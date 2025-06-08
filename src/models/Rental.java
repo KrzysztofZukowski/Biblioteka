@@ -1,6 +1,7 @@
 package models;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 
 public class Rental {
     private int id;
@@ -8,6 +9,7 @@ public class Rental {
     private int bookId;
     private LocalDate rentDate;
     private LocalDate returnDate;
+    private LocalDate expectedReturnDate; // Nowe pole
     private String status;
 
     // Pola dodatkowe dla łączenia z innymi tabelami
@@ -24,6 +26,17 @@ public class Rental {
         this.bookId = bookId;
         this.rentDate = rentDate;
         this.status = "ACTIVE";
+        // Domyślnie 14 dni na zwrot
+        this.expectedReturnDate = rentDate.plusDays(14);
+    }
+
+    // Konstruktor z okresem wypożyczenia
+    public Rental(int userId, int bookId, LocalDate rentDate, int rentalPeriodDays) {
+        this.userId = userId;
+        this.bookId = bookId;
+        this.rentDate = rentDate;
+        this.status = "ACTIVE";
+        this.expectedReturnDate = rentDate.plusDays(rentalPeriodDays);
     }
 
     // Gettery i settery
@@ -42,6 +55,11 @@ public class Rental {
     public LocalDate getReturnDate() { return returnDate; }
     public void setReturnDate(LocalDate returnDate) { this.returnDate = returnDate; }
 
+    public LocalDate getExpectedReturnDate() { return expectedReturnDate; }
+    public void setExpectedReturnDate(LocalDate expectedReturnDate) {
+        this.expectedReturnDate = expectedReturnDate;
+    }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
@@ -54,8 +72,55 @@ public class Rental {
     public String getBookAuthor() { return bookAuthor; }
     public void setBookAuthor(String bookAuthor) { this.bookAuthor = bookAuthor; }
 
+    // Metody pomocnicze
+    public boolean isOverdue() {
+        if (expectedReturnDate == null || !"ACTIVE".equals(status)) {
+            return false;
+        }
+        return LocalDate.now().isAfter(expectedReturnDate);
+    }
+
+    public long getDaysUntilReturn() {
+        if (expectedReturnDate == null || !"ACTIVE".equals(status)) {
+            return 0;
+        }
+        LocalDate today = LocalDate.now();
+        if (today.isAfter(expectedReturnDate)) {
+            return 0; // Już przeterminowana
+        }
+        return today.until(expectedReturnDate).getDays();
+    }
+
+    public long getDaysOverdue() {
+        if (expectedReturnDate == null || !"ACTIVE".equals(status)) {
+            return 0;
+        }
+        LocalDate today = LocalDate.now();
+        if (!today.isAfter(expectedReturnDate)) {
+            return 0; // Nie jest przeterminowana
+        }
+        return expectedReturnDate.until(today).getDays();
+    }
+
     @Override
     public String toString() {
-        return bookTitle + " - " + bookAuthor + " (wypożyczona: " + rentDate + ")";
+        StringBuilder sb = new StringBuilder();
+        sb.append(bookTitle).append(" - ").append(bookAuthor);
+        sb.append(" (wypożyczona: ").append(rentDate.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")));
+
+        if (expectedReturnDate != null) {
+            sb.append(", zwrot do: ").append(expectedReturnDate.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")));
+
+            if (isOverdue()) {
+                sb.append(" - PRZETERMINOWANA!");
+            } else if (getDaysUntilReturn() <= 3) {
+                sb.append(" - kończy się wkrótce");
+            }
+        } else {
+            sb.append(", brak ustalonej daty zwrotu");
+        }
+
+        sb.append(")");
+        return sb.toString();
     }
 }

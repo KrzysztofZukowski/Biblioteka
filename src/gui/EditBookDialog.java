@@ -6,24 +6,29 @@ import services.BookService;
 import javax.swing.*;
 import java.awt.*;
 
-public class AddBookDialog extends JDialog {
+public class EditBookDialog extends JDialog {
     private BookService bookService = new BookService();
+    private Book bookToEdit;
     private JTextField isbnField;
     private JTextField titleField;
     private JTextField authorField;
     private JTextField publisherField;
     private JTextField yearField;
-    private boolean bookAdded = false;
+    private JButton saveButton;
+    private JButton cancelButton;
+    private boolean bookUpdated = false;
 
-    public AddBookDialog(Frame parent) {
-        super(parent, "Dodaj nową książkę", true);
+    public EditBookDialog(Frame parent, Book book) {
+        super(parent, "Edytuj książkę", true);
+        this.bookToEdit = book;
         initializeComponents();
         setupLayout();
         setupEventHandlers();
+        loadBookData();
     }
 
     private void initializeComponents() {
-        setSize(400, 300);
+        setSize(400, 320);
         setLocationRelativeTo(getParent());
         setResizable(false);
 
@@ -32,6 +37,8 @@ public class AddBookDialog extends JDialog {
         authorField = new JTextField(15);
         publisherField = new JTextField(15);
         yearField = new JTextField(15);
+        saveButton = new JButton("Zapisz zmiany");
+        cancelButton = new JButton("Anuluj");
     }
 
     private void setupLayout() {
@@ -39,28 +46,38 @@ public class AddBookDialog extends JDialog {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 10, 5, 10);
 
+        // Informacja o edytowanej książce
+        JLabel headerLabel = new JLabel("Edytuj dane książki:");
+        headerLabel.setFont(headerLabel.getFont().deriveFont(Font.BOLD, 12f));
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        gbc.insets = new Insets(10, 10, 15, 10);
+        add(headerLabel, gbc);
+
         // Pola formularza
-        gbc.gridx = 0; gbc.gridy = 0;
+        gbc.gridwidth = 1;
+        gbc.insets = new Insets(5, 10, 5, 10);
+
+        gbc.gridx = 0; gbc.gridy = 1;
         add(new JLabel("ISBN:"), gbc);
         gbc.gridx = 1;
         add(isbnField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 1;
+        gbc.gridx = 0; gbc.gridy = 2;
         add(new JLabel("Tytuł:*"), gbc);
         gbc.gridx = 1;
         add(titleField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.gridx = 0; gbc.gridy = 3;
         add(new JLabel("Autor:*"), gbc);
         gbc.gridx = 1;
         add(authorField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 3;
+        gbc.gridx = 0; gbc.gridy = 4;
         add(new JLabel("Wydawnictwo:"), gbc);
         gbc.gridx = 1;
         add(publisherField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 4;
+        gbc.gridx = 0; gbc.gridy = 5;
         add(new JLabel("Rok wydania:"), gbc);
         gbc.gridx = 1;
         add(yearField, gbc);
@@ -68,37 +85,38 @@ public class AddBookDialog extends JDialog {
         // Etykieta informacyjna
         JLabel infoLabel = new JLabel("* Pola wymagane");
         infoLabel.setFont(infoLabel.getFont().deriveFont(Font.ITALIC, 10f));
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2;
+        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 2;
         gbc.insets = new Insets(5, 10, 15, 10);
         add(infoLabel, gbc);
 
         // Przyciski
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        JButton addButton = new JButton("Dodaj");
-        JButton cancelButton = new JButton("Anuluj");
-
-        buttonPanel.add(addButton);
+        buttonPanel.add(saveButton);
         buttonPanel.add(cancelButton);
 
-        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 2;
+        gbc.gridx = 0; gbc.gridy = 7; gbc.gridwidth = 2;
         gbc.insets = new Insets(10, 10, 10, 10);
         add(buttonPanel, gbc);
     }
 
     private void setupEventHandlers() {
-        JPanel buttonPanel = (JPanel) getContentPane().getComponent(11); // Ostatni komponent
-        JButton addButton = (JButton) buttonPanel.getComponent(0);
-        JButton cancelButton = (JButton) buttonPanel.getComponent(1);
-
-        addButton.addActionListener(e -> handleAddBook());
+        saveButton.addActionListener(e -> handleSaveBook());
         cancelButton.addActionListener(e -> dispose());
 
         // Enter w polach tekstowych
-        titleField.addActionListener(e -> handleAddBook());
-        authorField.addActionListener(e -> handleAddBook());
+        titleField.addActionListener(e -> handleSaveBook());
+        authorField.addActionListener(e -> handleSaveBook());
     }
 
-    private void handleAddBook() {
+    private void loadBookData() {
+        isbnField.setText(bookToEdit.getIsbn() != null ? bookToEdit.getIsbn() : "");
+        titleField.setText(bookToEdit.getTitle());
+        authorField.setText(bookToEdit.getAuthor());
+        publisherField.setText(bookToEdit.getPublisher() != null ? bookToEdit.getPublisher() : "");
+        yearField.setText(bookToEdit.getYear() > 0 ? String.valueOf(bookToEdit.getYear()) : "");
+    }
+
+    private void handleSaveBook() {
         String isbn = isbnField.getText().trim();
         String title = titleField.getText().trim();
         String author = authorField.getText().trim();
@@ -143,23 +161,42 @@ public class AddBookDialog extends JDialog {
             }
         }
 
-        // Utwórz książkę i spróbuj dodać
-        Book book = new Book(isbn.isEmpty() ? null : isbn, title, author, publisher, year);
+        // Sprawdź czy coś się zmieniło
+        boolean hasChanges = !title.equals(bookToEdit.getTitle()) ||
+                !author.equals(bookToEdit.getAuthor()) ||
+                !publisher.equals(bookToEdit.getPublisher() != null ? bookToEdit.getPublisher() : "") ||
+                !isbn.equals(bookToEdit.getIsbn() != null ? bookToEdit.getIsbn() : "") ||
+                year != bookToEdit.getYear();
 
-        if (bookService.addBook(book)) {
-            bookAdded = true;
+        if (!hasChanges) {
             JOptionPane.showMessageDialog(this,
-                    "Książka została pomyślnie dodana do systemu!",
+                    "Nie wprowadzono żadnych zmian.",
+                    "Informacja",
+                    JOptionPane.INFORMATION_MESSAGE);
+            dispose();
+            return;
+        }
+
+        // Aktualizuj dane książki
+        bookToEdit.setIsbn(isbn.isEmpty() ? null : isbn);
+        bookToEdit.setTitle(title);
+        bookToEdit.setAuthor(author);
+        bookToEdit.setPublisher(publisher.isEmpty() ? null : publisher);
+        bookToEdit.setYear(year);
+
+        if (bookService.updateBook(bookToEdit)) {
+            bookUpdated = true;
+            JOptionPane.showMessageDialog(this,
+                    "Dane książki zostały pomyślnie zaktualizowane!",
                     "Sukces",
                     JOptionPane.INFORMATION_MESSAGE);
             dispose();
         } else {
-            // BookService już wyświetli szczegóły w konsoli
             JOptionPane.showMessageDialog(this,
-                    "Nie można dodać książki!\n\nMożliwe przyczyny:\n" +
+                    "Nie można zaktualizować książki!\n\nMożliwe przyczyny:\n" +
                             "• Książka o takich danych już istnieje w systemie\n" +
                             "• Błąd połączenia z bazą danych\n\n" +
-                            "Sprawdź czy książka o tym tytule i autorze nie została już dodana.",
+                            "Sprawdź czy inne książki nie mają już takich samych danych.",
                     "Błąd",
                     JOptionPane.ERROR_MESSAGE);
         }
@@ -178,7 +215,7 @@ public class AddBookDialog extends JDialog {
         return isbn.matches("\\d{9}[\\dX]") || isbn.matches("\\d{13}");
     }
 
-    public boolean wasBookAdded() {
-        return bookAdded;
+    public boolean wasBookUpdated() {
+        return bookUpdated;
     }
 }

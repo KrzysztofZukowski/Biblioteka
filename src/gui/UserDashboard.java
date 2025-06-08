@@ -26,6 +26,7 @@ public class UserDashboard extends JFrame {
     private JButton refreshRentalsButton;
     private JButton rentButton;
     private JButton refreshBooksButton;
+    private JButton extendRentalButton;
 
     public UserDashboard(User user) {
         this.currentUser = user;
@@ -38,7 +39,7 @@ public class UserDashboard extends JFrame {
     private void initializeComponents() {
         setTitle("Panel Użytkownika - " + currentUser.getUsername());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(800, 600);
+        setSize(900, 700);
         setLocationRelativeTo(null);
 
         rentalsListModel = new DefaultListModel<>();
@@ -55,6 +56,10 @@ public class UserDashboard extends JFrame {
         refreshRentalsButton = new JButton("Odśwież");
         rentButton = new JButton("Wypożycz książkę");
         refreshBooksButton = new JButton("Odśwież");
+        extendRentalButton = new JButton("Przedłuż wypożyczenie");
+
+        // Ustawienie kolorów dla przeterminowanych książek
+        rentalsList.setCellRenderer(new RentalListCellRenderer());
     }
 
     private void setupLayout() {
@@ -71,11 +76,18 @@ public class UserDashboard extends JFrame {
 
         // Zakładka "Moje wypożyczenia"
         JPanel rentalsPanel = new JPanel(new BorderLayout());
-        rentalsPanel.add(new JLabel("Moje wypożyczone książki:"), BorderLayout.NORTH);
+
+        // Panel z informacjami o wypożyczeniach
+        JPanel rentalsInfoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JLabel rentalsInfoLabel = new JLabel("Moje wypożyczone książki:");
+        rentalsInfoPanel.add(rentalsInfoLabel);
+        rentalsPanel.add(rentalsInfoPanel, BorderLayout.NORTH);
+
         rentalsPanel.add(new JScrollPane(rentalsList), BorderLayout.CENTER);
 
         JPanel rentalsButtonPanel = new JPanel(new FlowLayout());
         rentalsButtonPanel.add(returnButton);
+        rentalsButtonPanel.add(extendRentalButton);
         rentalsButtonPanel.add(refreshRentalsButton);
         rentalsPanel.add(rentalsButtonPanel, BorderLayout.SOUTH);
 
@@ -103,20 +115,13 @@ public class UserDashboard extends JFrame {
         refreshRentalsButton.addActionListener(e -> loadUserRentals());
         rentButton.addActionListener(e -> rentBook());
         refreshBooksButton.addActionListener(e -> loadAvailableBooks());
+        extendRentalButton.addActionListener(e -> extendRental());
 
-        // Obsługa podwójnego kliknięcia na listach
+        // Obsługa podwójnego kliknięcia tylko dla zwrotu książek
         rentalsList.addMouseListener(new java.awt.event.MouseAdapter() {
             public void mouseClicked(java.awt.event.MouseEvent evt) {
                 if (evt.getClickCount() == 2) {
-                    returnBook();
-                }
-            }
-        });
-
-        availableBooksList.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseClicked(java.awt.event.MouseEvent evt) {
-                if (evt.getClickCount() == 2) {
-                    rentBook();
+                    showRentalDetails();
                 }
             }
         });
@@ -130,8 +135,31 @@ public class UserDashboard extends JFrame {
     private void loadUserRentals() {
         rentalsListModel.clear();
         List<Rental> rentals = rentalService.getUserRentals(currentUser.getId());
+
+        // Liczenie przeterminowanych
+        int overdueCount = 0;
         for (Rental rental : rentals) {
+            if (rental.isOverdue()) {
+                overdueCount++;
+            }
             rentalsListModel.addElement(rental);
+        }
+
+        // Aktualizacja informacji w zakładce
+        Component[] components = ((JPanel)((JTabbedPane)getContentPane().getComponent(1)).getComponent(0)).getComponents();
+        JPanel infoPanel = (JPanel) components[0];
+        JLabel infoLabel = (JLabel) infoPanel.getComponent(0);
+
+        String infoText = "Moje wypożyczone książki: " + rentals.size();
+        if (overdueCount > 0) {
+            infoText += " (Przeterminowane: " + overdueCount + ")";
+        }
+        infoLabel.setText(infoText);
+
+        if (overdueCount > 0) {
+            infoLabel.setForeground(Color.RED);
+        } else {
+            infoLabel.setForeground(Color.BLACK);
         }
     }
 
@@ -176,18 +204,83 @@ public class UserDashboard extends JFrame {
 
         int confirm = JOptionPane.showConfirmDialog(
                 this,
-                "Czy chcesz wypożyczyć książkę: " + selectedBook.getTitle() + "?",
+                "Czy chcesz wypożyczyć książkę: " + selectedBook.getTitle() + "?\n" +
+                        "Standardowy okres wypożyczenia: 14 dni",
                 "Potwierdzenie",
                 JOptionPane.YES_NO_OPTION
         );
 
         if (confirm == JOptionPane.YES_OPTION) {
             if (rentalService.rentBook(currentUser.getId(), selectedBook.getId())) {
-                JOptionPane.showMessageDialog(this, "Książka została wypożyczona!", "Sukces", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Książka została wypożyczona na 14 dni!", "Sukces", JOptionPane.INFORMATION_MESSAGE);
                 loadData(); // Odśwież obie listy
             } else {
                 JOptionPane.showMessageDialog(this, "Błąd podczas wypożyczania książki!", "Błąd", JOptionPane.ERROR_MESSAGE);
             }
+        }
+    }
+
+    private void extendRental() {
+        Rental selectedRental = rentalsList.getSelectedValue();
+        if (selectedRental == null) {
+            JOptionPane.showMessageDialog(this, "Proszę wybrać wypożyczenie do przedłużenia!", "Informacja", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String[] options = {"7 dni", "14 dni", "30 dni"};
+        int choice = JOptionPane.showOptionDialog(
+                this,
+                "O ile dni chcesz przedłużyć wypożyczenie książki:\n" + selectedRental.getBookTitle() + "?",
+                "Przedłuż wypożyczenie",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]
+        );
+
+        if (choice >= 0) {
+            int days = switch (choice) {
+                case 0 -> 7;
+                case 1 -> 14;
+                case 2 -> 30;
+                default -> 0;
+            };
+
+            if (rentalService.extendRental(selectedRental.getId(), days)) {
+                JOptionPane.showMessageDialog(this,
+                        "Wypożyczenie zostało przedłużone o " + days + " dni!",
+                        "Sukces",
+                        JOptionPane.INFORMATION_MESSAGE);
+                loadUserRentals(); // Odśwież listę wypożyczeń
+            } else {
+                JOptionPane.showMessageDialog(this,
+                        "Błąd podczas przedłużania wypożyczenia!",
+                        "Błąd",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void showRentalDetails() {
+        Rental selectedRental = rentalsList.getSelectedValue();
+        if (selectedRental != null) {
+            String details = String.format(
+                    "Książka: %s\nAutor: %s\nData wypożyczenia: %s\nOczekiwana data zwrotu: %s\nStatus: %s",
+                    selectedRental.getBookTitle(),
+                    selectedRental.getBookAuthor(),
+                    selectedRental.getRentDate(),
+                    selectedRental.getExpectedReturnDate(),
+                    selectedRental.isOverdue() ? "PRZETERMINOWANA" : "Aktywna"
+            );
+
+            if (selectedRental.isOverdue()) {
+                details += "\nDni przeterminowania: " + selectedRental.getDaysOverdue();
+            } else {
+                details += "\nDni do zwrotu: " + selectedRental.getDaysUntilReturn();
+            }
+
+            JOptionPane.showMessageDialog(this, details, "Szczegóły wypożyczenia", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
@@ -202,6 +295,32 @@ public class UserDashboard extends JFrame {
         if (confirm == JOptionPane.YES_OPTION) {
             this.dispose();
             new LoginFrame().setVisible(true);
+        }
+    }
+
+    // Renderer dla kolorowania przeterminowanych wypożyczeń
+    private static class RentalListCellRenderer extends DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                      boolean isSelected, boolean cellHasFocus) {
+            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+
+            if (value instanceof Rental rental) {
+                if (!isSelected) {
+                    if (rental.isOverdue()) {
+                        setBackground(new Color(255, 200, 200)); // Jasny czerwony
+                        setForeground(Color.BLACK);
+                    } else if (rental.getDaysUntilReturn() <= 3) {
+                        setBackground(new Color(255, 255, 200)); // Jasny żółty
+                        setForeground(Color.BLACK);
+                    } else {
+                        setBackground(Color.WHITE);
+                        setForeground(Color.BLACK);
+                    }
+                }
+            }
+
+            return this;
         }
     }
 }
