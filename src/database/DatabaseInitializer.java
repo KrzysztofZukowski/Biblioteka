@@ -32,7 +32,7 @@ public class DatabaseInitializer {
                 """;
             stmt.execute(createUsersTable);
 
-            // Tworzenie tabeli books (bez UNIQUE constraint - będziemy sprawdzać programowo)
+            // Tworzenie tabeli books
             String createBooksTable = """
                 CREATE TABLE IF NOT EXISTS books (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,16 +57,43 @@ public class DatabaseInitializer {
                     return_date DATE,
                     expected_return_date DATE,
                     status VARCHAR(20) DEFAULT 'ACTIVE',
+                    extension_count INTEGER DEFAULT 0,
                     FOREIGN KEY (user_id) REFERENCES users(id),
                     FOREIGN KEY (book_id) REFERENCES books(id)
                 )
                 """;
             stmt.execute(createRentalsTable);
 
-            // Dodaj kolumnę expected_return_date jeśli nie istnieje (dla starych baz)
+            // Tworzenie tabeli extension_requests dla próśb wymagających zgody admina
+            String createExtensionRequestsTable = """
+                CREATE TABLE IF NOT EXISTS extension_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rental_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    requested_days INTEGER NOT NULL,
+                    request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status VARCHAR(20) DEFAULT 'PENDING',
+                    admin_decision_date TIMESTAMP,
+                    admin_id INTEGER,
+                    admin_comment TEXT,
+                    FOREIGN KEY (rental_id) REFERENCES rentals(id),
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (admin_id) REFERENCES users(id)
+                )
+                """;
+            stmt.execute(createExtensionRequestsTable);
+
+            // Dodaj kolumny jeśli nie istnieją (dla starych baz)
             try {
                 String addExpectedReturnColumn = "ALTER TABLE rentals ADD COLUMN expected_return_date DATE";
                 stmt.execute(addExpectedReturnColumn);
+            } catch (SQLException e) {
+                // Kolumna już istnieje - ignoruj błąd
+            }
+
+            try {
+                String addExtensionCountColumn = "ALTER TABLE rentals ADD COLUMN extension_count INTEGER DEFAULT 0";
+                stmt.execute(addExtensionCountColumn);
             } catch (SQLException e) {
                 // Kolumna już istnieje - ignoruj błąd
             }
@@ -89,6 +116,9 @@ public class DatabaseInitializer {
 
             // Napraw istniejące wypożyczenia bez expected_return_date
             fixExistingRentals(conn);
+
+            // Ustaw domyślną wartość extension_count dla istniejących wypożyczeń
+            fixExtensionCount(conn);
 
             System.out.println("Baza danych została zainicjalizowana!");
 
@@ -211,6 +241,23 @@ public class DatabaseInitializer {
             }
         } catch (SQLException e) {
             System.out.println("Informacja: Nie można naprawić wypożyczeń: " + e.getMessage());
+        }
+    }
+
+    private static void fixExtensionCount(Connection conn) {
+        String updateSQL = """
+            UPDATE rentals 
+            SET extension_count = 0
+            WHERE extension_count IS NULL
+            """;
+
+        try (PreparedStatement pstmt = conn.prepareStatement(updateSQL)) {
+            int updated = pstmt.executeUpdate();
+            if (updated > 0) {
+                System.out.println("Naprawiono " + updated + " wypożyczeń bez licznika przedłużeń.");
+            }
+        } catch (SQLException e) {
+            System.out.println("Informacja: Nie można naprawić licznika przedłużeń: " + e.getMessage());
         }
     }
 }

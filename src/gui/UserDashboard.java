@@ -227,10 +227,14 @@ public class UserDashboard extends JFrame {
             return;
         }
 
+        // Sprawdź status przedłużeń i pokaż odpowiedni komunikat
+        String extensionInfo = getExtensionInfoMessage(selectedRental);
+
         String[] options = {"7 dni", "14 dni", "30 dni"};
         int choice = JOptionPane.showOptionDialog(
                 this,
-                "O ile dni chcesz przedłużyć wypożyczenie książki:\n" + selectedRental.getBookTitle() + "?",
+                "O ile dni chcesz przedłużyć wypożyczenie książki:\n" +
+                        selectedRental.getBookTitle() + "?\n\n" + extensionInfo,
                 "Przedłuż wypożyczenie",
                 JOptionPane.DEFAULT_OPTION,
                 JOptionPane.QUESTION_MESSAGE,
@@ -247,18 +251,38 @@ public class UserDashboard extends JFrame {
                 default -> 0;
             };
 
-            if (rentalService.extendRental(selectedRental.getId(), days)) {
+            RentalService.ExtensionResult result = rentalService.extendRental(selectedRental.getId(), days);
+
+            if (result.isSuccess()) {
                 JOptionPane.showMessageDialog(this,
-                        "Wypożyczenie zostało przedłużone o " + days + " dni!",
+                        result.getMessage(),
                         "Sukces",
                         JOptionPane.INFORMATION_MESSAGE);
                 loadUserRentals(); // Odśwież listę wypożyczeń
             } else {
-                JOptionPane.showMessageDialog(this,
-                        "Błąd podczas przedłużania wypożyczenia!",
-                        "Błąd",
-                        JOptionPane.ERROR_MESSAGE);
+                if (result.needsAdminApproval()) {
+                    JOptionPane.showMessageDialog(this,
+                            result.getMessage(),
+                            "Prośba wysłana",
+                            JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    JOptionPane.showMessageDialog(this,
+                            result.getMessage(),
+                            "Błąd",
+                            JOptionPane.ERROR_MESSAGE);
+                }
             }
+        }
+    }
+
+    private String getExtensionInfoMessage(Rental rental) {
+        if (rental.canSelfExtend()) {
+            int remainingExtensions = 2 - rental.getExtensionCount();
+            return String.format("Przedłużeń użytych: %d/2\nPozostało przedłużeń samodzielnych: %d",
+                    rental.getExtensionCount(), remainingExtensions);
+        } else {
+            return String.format("Przedłużeń użytych: %d/2\n⚠️ UWAGA: Kolejne przedłużenia wymagają zgody administratora!",
+                    rental.getExtensionCount());
         }
     }
 
@@ -266,18 +290,27 @@ public class UserDashboard extends JFrame {
         Rental selectedRental = rentalsList.getSelectedValue();
         if (selectedRental != null) {
             String details = String.format(
-                    "Książka: %s\nAutor: %s\nData wypożyczenia: %s\nOczekiwana data zwrotu: %s\nStatus: %s",
+                    "Książka: %s\nAutor: %s\nData wypożyczenia: %s\nOczekiwana data zwrotu: %s\nStatus: %s\nLiczba przedłużeń: %d",
                     selectedRental.getBookTitle(),
                     selectedRental.getBookAuthor(),
                     selectedRental.getRentDate(),
                     selectedRental.getExpectedReturnDate(),
-                    selectedRental.isOverdue() ? "PRZETERMINOWANA" : "Aktywna"
+                    selectedRental.isOverdue() ? "PRZETERMINOWANA" : "Aktywna",
+                    selectedRental.getExtensionCount()
             );
 
             if (selectedRental.isOverdue()) {
                 details += "\nDni przeterminowania: " + selectedRental.getDaysOverdue();
             } else {
                 details += "\nDni do zwrotu: " + selectedRental.getDaysUntilReturn();
+            }
+
+            // Dodaj informację o możliwości przedłużenia
+            if (selectedRental.canSelfExtend()) {
+                int remainingExtensions = 2 - selectedRental.getExtensionCount();
+                details += "\n\nMożesz jeszcze " + remainingExtensions + " razy samodzielnie przedłużyć to wypożyczenie.";
+            } else {
+                details += "\n\n⚠️ Kolejne przedłużenia tego wypożyczenia wymagają zgody administratora.";
             }
 
             JOptionPane.showMessageDialog(this, details, "Szczegóły wypożyczenia", JOptionPane.INFORMATION_MESSAGE);
@@ -306,6 +339,9 @@ public class UserDashboard extends JFrame {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
 
             if (value instanceof Rental rental) {
+                // Dodaj informacje o przedłużeniach do wyświetlanego tekstu
+                String displayText = rental.toString();
+
                 if (!isSelected) {
                     if (rental.isOverdue()) {
                         setBackground(new Color(255, 200, 200)); // Jasny czerwony
@@ -313,11 +349,16 @@ public class UserDashboard extends JFrame {
                     } else if (rental.getDaysUntilReturn() <= 3) {
                         setBackground(new Color(255, 255, 200)); // Jasny żółty
                         setForeground(Color.BLACK);
+                    } else if (!rental.canSelfExtend()) {
+                        setBackground(new Color(255, 220, 180)); // Jasny pomarańczowy - wymaga zgody admina
+                        setForeground(Color.BLACK);
                     } else {
                         setBackground(Color.WHITE);
                         setForeground(Color.BLACK);
                     }
                 }
+
+                setText(displayText);
             }
 
             return this;

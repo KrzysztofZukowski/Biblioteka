@@ -3,6 +3,7 @@ package gui;
 import models.Book;
 import models.Rental;
 import models.User;
+import models.ExtensionRequest;
 import services.BookService;
 import services.RentalService;
 
@@ -17,8 +18,10 @@ public class AdminDashboard extends JFrame {
 
     private DefaultListModel<Book> booksListModel;
     private DefaultListModel<Rental> rentalsListModel;
+    private DefaultListModel<ExtensionRequest> extensionRequestsListModel;
     private JList<Book> booksList;
     private JList<Rental> rentalsList;
+    private JList<ExtensionRequest> extensionRequestsList;
 
     // Przyciski jako pola klasy
     private JButton logoutButton;
@@ -30,6 +33,9 @@ public class AdminDashboard extends JFrame {
     private JButton forceReturnButton;
     private JButton refreshRentalsButton;
     private JButton overdueButton;
+    private JButton approveRequestButton;
+    private JButton rejectRequestButton;
+    private JButton refreshRequestsButton;
 
     public AdminDashboard(User user) {
         this.currentUser = user;
@@ -47,11 +53,14 @@ public class AdminDashboard extends JFrame {
 
         booksListModel = new DefaultListModel<>();
         rentalsListModel = new DefaultListModel<>();
+        extensionRequestsListModel = new DefaultListModel<>();
         booksList = new JList<>(booksListModel);
         rentalsList = new JList<>(rentalsListModel);
+        extensionRequestsList = new JList<>(extensionRequestsListModel);
 
         booksList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         rentalsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        extensionRequestsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
         // Inicjalizacja przycisków
         logoutButton = new JButton("Wyloguj");
@@ -63,6 +72,9 @@ public class AdminDashboard extends JFrame {
         forceReturnButton = new JButton("Oznacz jako zwróconą");
         refreshRentalsButton = new JButton("Odśwież");
         overdueButton = new JButton("Pokaż przeterminowane");
+        approveRequestButton = new JButton("Zatwierdź");
+        rejectRequestButton = new JButton("Odrzuć");
+        refreshRequestsButton = new JButton("Odśwież");
 
         // Wyłącz przycisk skanowania na razie
         scanISBNButton.setEnabled(false);
@@ -112,6 +124,19 @@ public class AdminDashboard extends JFrame {
 
         tabbedPane.addTab("Wypożyczenia", rentalsPanel);
 
+        // Zakładka "Prośby o przedłużenie"
+        JPanel extensionRequestsPanel = new JPanel(new BorderLayout());
+        extensionRequestsPanel.add(new JLabel("Prośby o przedłużenie wypożyczeń:"), BorderLayout.NORTH);
+        extensionRequestsPanel.add(new JScrollPane(extensionRequestsList), BorderLayout.CENTER);
+
+        JPanel extensionButtonPanel = new JPanel(new FlowLayout());
+        extensionButtonPanel.add(approveRequestButton);
+        extensionButtonPanel.add(rejectRequestButton);
+        extensionButtonPanel.add(refreshRequestsButton);
+        extensionRequestsPanel.add(extensionButtonPanel, BorderLayout.SOUTH);
+
+        tabbedPane.addTab("Prośby o przedłużenie", extensionRequestsPanel);
+
         add(tabbedPane, BorderLayout.CENTER);
     }
 
@@ -126,6 +151,9 @@ public class AdminDashboard extends JFrame {
         forceReturnButton.addActionListener(e -> forceReturn());
         refreshRentalsButton.addActionListener(e -> loadRentals());
         overdueButton.addActionListener(e -> showOverdueRentals());
+        approveRequestButton.addActionListener(e -> approveExtensionRequest());
+        rejectRequestButton.addActionListener(e -> rejectExtensionRequest());
+        refreshRequestsButton.addActionListener(e -> loadExtensionRequests());
 
         // Obsługa podwójnego kliknięcia
         booksList.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -143,11 +171,20 @@ public class AdminDashboard extends JFrame {
                 }
             }
         });
+
+        extensionRequestsList.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent evt) {
+                if (evt.getClickCount() == 2) {
+                    showExtensionRequestDetails();
+                }
+            }
+        });
     }
 
     private void loadData() {
         loadBooks();
         loadRentals();
+        loadExtensionRequests();
     }
 
     private void loadBooks() {
@@ -172,6 +209,23 @@ public class AdminDashboard extends JFrame {
             String message = "Uwaga! Znaleziono " + overdueRentals.size() + " przeterminowanych wypożyczeń.";
             SwingUtilities.invokeLater(() ->
                     JOptionPane.showMessageDialog(this, message, "Przeterminowane wypożyczenia", JOptionPane.WARNING_MESSAGE)
+            );
+        }
+    }
+
+    private void loadExtensionRequests() {
+        extensionRequestsListModel.clear();
+        List<ExtensionRequest> requests = rentalService.getPendingExtensionRequests();
+
+        for (ExtensionRequest request : requests) {
+            extensionRequestsListModel.addElement(request);
+        }
+
+        // Pokaż powiadomienie o nowych prośbach (tylko przy pierwszym ładowaniu)
+        if (!requests.isEmpty() && extensionRequestsListModel.size() == requests.size()) {
+            String message = "Uwaga! Oczekuje " + requests.size() + " próśb o przedłużenie wypożyczeń.";
+            SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(this, message, "Nowe prośby o przedłużenie", JOptionPane.INFORMATION_MESSAGE)
             );
         }
     }
@@ -210,13 +264,14 @@ public class AdminDashboard extends JFrame {
                     : "Brak ustalonej daty";
 
             String details = String.format(
-                    "Użytkownik: %s\nKsiążka: %s\nAutor: %s\nData wypożyczenia: %s\nOczekiwana data zwrotu: %s\nStatus: %s",
+                    "Użytkownik: %s\nKsiążka: %s\nAutor: %s\nData wypożyczenia: %s\nOczekiwana data zwrotu: %s\nStatus: %s\nLiczba przedłużeń: %d",
                     selectedRental.getUsername(),
                     selectedRental.getBookTitle(),
                     selectedRental.getBookAuthor(),
                     selectedRental.getRentDate(),
                     expectedDateStr,
-                    selectedRental.isOverdue() ? "PRZETERMINOWANA" : "Aktywna"
+                    selectedRental.isOverdue() ? "PRZETERMINOWANA" : "Aktywna",
+                    selectedRental.getExtensionCount()
             );
 
             if (selectedRental.getExpectedReturnDate() != null) {
@@ -230,6 +285,93 @@ public class AdminDashboard extends JFrame {
             }
 
             JOptionPane.showMessageDialog(this, details, "Szczegóły wypożyczenia", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void showExtensionRequestDetails() {
+        ExtensionRequest selectedRequest = extensionRequestsList.getSelectedValue();
+        if (selectedRequest != null) {
+            String details = String.format(
+                    "Użytkownik: %s\nKsiążka: %s\nAutor: %s\nLiczba dni do przedłużenia: %d\nData prośby: %s\nStatus: %s",
+                    selectedRequest.getUsername(),
+                    selectedRequest.getBookTitle(),
+                    selectedRequest.getBookAuthor(),
+                    selectedRequest.getRequestedDays(),
+                    selectedRequest.getRequestDate(),
+                    selectedRequest.getStatus()
+            );
+
+            JOptionPane.showMessageDialog(this, details, "Szczegóły prośby o przedłużenie", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void approveExtensionRequest() {
+        ExtensionRequest selectedRequest = extensionRequestsList.getSelectedValue();
+        if (selectedRequest == null) {
+            JOptionPane.showMessageDialog(this, "Proszę wybrać prośbę do zatwierdzenia!", "Informacja", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String comment = JOptionPane.showInputDialog(this,
+                "Czy chcesz dodać komentarz do zatwierdzenia?\n(Opcjonalne)",
+                "Komentarz administratora",
+                JOptionPane.QUESTION_MESSAGE);
+
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                String.format("Czy na pewno chcesz zatwierdzić przedłużenie o %d dni dla:\n%s - %s?",
+                        selectedRequest.getRequestedDays(),
+                        selectedRequest.getUsername(),
+                        selectedRequest.getBookTitle()),
+                "Potwierdzenie",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            if (rentalService.approveExtensionRequest(selectedRequest.getId(), currentUser.getId(), comment)) {
+                JOptionPane.showMessageDialog(this, "Prośba została zatwierdzona!", "Sukces", JOptionPane.INFORMATION_MESSAGE);
+                loadExtensionRequests();
+                loadRentals(); // Odśwież również listę wypożyczeń
+            } else {
+                JOptionPane.showMessageDialog(this, "Błąd podczas zatwierdzania prośby!", "Błąd", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void rejectExtensionRequest() {
+        ExtensionRequest selectedRequest = extensionRequestsList.getSelectedValue();
+        if (selectedRequest == null) {
+            JOptionPane.showMessageDialog(this, "Proszę wybrać prośbę do odrzucenia!", "Informacja", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        String comment = JOptionPane.showInputDialog(this,
+                "Proszę podać powód odrzucenia prośby:",
+                "Komentarz administratora",
+                JOptionPane.QUESTION_MESSAGE);
+
+        if (comment == null || comment.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Komentarz jest wymagany przy odrzucaniu prośby!", "Błąd", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                String.format("Czy na pewno chcesz odrzucić przedłużenie dla:\n%s - %s?\n\nPowód: %s",
+                        selectedRequest.getUsername(),
+                        selectedRequest.getBookTitle(),
+                        comment),
+                "Potwierdzenie",
+                JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            if (rentalService.rejectExtensionRequest(selectedRequest.getId(), currentUser.getId(), comment)) {
+                JOptionPane.showMessageDialog(this, "Prośba została odrzucona!", "Sukces", JOptionPane.INFORMATION_MESSAGE);
+                loadExtensionRequests();
+            } else {
+                JOptionPane.showMessageDialog(this, "Błąd podczas odrzucania prośby!", "Błąd", JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
 
@@ -367,6 +509,10 @@ public class AdminDashboard extends JFrame {
                         rental.getRentDate(),
                         expectedDateStr
                 );
+
+                if (rental.getExtensionCount() > 0) {
+                    displayText += " [" + rental.getExtensionCount() + " przedłużeń]";
+                }
 
                 if (!isSelected) {
                     if (rental.isOverdue()) {

@@ -9,8 +9,9 @@ public class Rental {
     private int bookId;
     private LocalDate rentDate;
     private LocalDate returnDate;
-    private LocalDate expectedReturnDate; // Nowe pole
+    private LocalDate expectedReturnDate;
     private String status;
+    private int extensionCount; // Nowe pole
 
     // Pola dodatkowe dla łączenia z innymi tabelami
     private String username;
@@ -18,7 +19,9 @@ public class Rental {
     private String bookAuthor;
 
     // Konstruktor domyślny
-    public Rental() {}
+    public Rental() {
+        this.extensionCount = 0;
+    }
 
     // Konstruktor z parametrami
     public Rental(int userId, int bookId, LocalDate rentDate) {
@@ -26,6 +29,7 @@ public class Rental {
         this.bookId = bookId;
         this.rentDate = rentDate;
         this.status = "ACTIVE";
+        this.extensionCount = 0;
         // Domyślnie 14 dni na zwrot
         this.expectedReturnDate = rentDate.plusDays(14);
     }
@@ -36,6 +40,7 @@ public class Rental {
         this.bookId = bookId;
         this.rentDate = rentDate;
         this.status = "ACTIVE";
+        this.extensionCount = 0;
         this.expectedReturnDate = rentDate.plusDays(rentalPeriodDays);
     }
 
@@ -62,6 +67,9 @@ public class Rental {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public int getExtensionCount() { return extensionCount; }
+    public void setExtensionCount(int extensionCount) { this.extensionCount = extensionCount; }
 
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
@@ -102,6 +110,14 @@ public class Rental {
         return expectedReturnDate.until(today).getDays();
     }
 
+    public boolean canSelfExtend() {
+        return extensionCount < 2; // Można samodzielnie przedłużyć maksymalnie 2 razy
+    }
+
+    public boolean needsAdminApproval() {
+        return extensionCount >= 2; // Od 3. przedłużenia potrzebna zgoda admina
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
@@ -118,6 +134,10 @@ public class Rental {
             }
         } else {
             sb.append(", brak ustalonej daty zwrotu");
+        }
+
+        if (extensionCount > 0) {
+            sb.append(" [Przedłużona ").append(extensionCount).append(" raz(y)]");
         }
 
         sb.append(")");

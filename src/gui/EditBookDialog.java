@@ -149,7 +149,7 @@ public class EditBookDialog extends JDialog {
             }
         }
 
-        // Walidacja ISBN (opcjonalna ale jeśli podana to sprawdź format)
+        // Walidacja ISBN
         if (!isbn.isEmpty() && !isValidISBN(isbn)) {
             int choice = JOptionPane.showConfirmDialog(this,
                     "Podany ISBN może być nieprawidłowy. Czy chcesz kontynuować?",
