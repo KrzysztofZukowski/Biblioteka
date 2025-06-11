@@ -45,6 +45,76 @@ public class BookService {
         return books;
     }
 
+    /**
+     * Wyszukuje książki z zastosowaniem filtrów
+     */
+    public List<Book> searchBooksWithFilters(String titleFilter, String authorFilter,
+                                             String publisherFilter, Integer yearFrom,
+                                             Integer yearTo, Boolean availableOnly) {
+        List<Book> books = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("SELECT * FROM books WHERE 1=1");
+        List<Object> parameters = new ArrayList<>();
+
+        // Filtr tytułu
+        if (titleFilter != null && !titleFilter.trim().isEmpty()) {
+            sql.append(" AND LOWER(title) LIKE LOWER(?)");
+            parameters.add("%" + titleFilter.trim() + "%");
+        }
+
+        // Filtr autora
+        if (authorFilter != null && !authorFilter.trim().isEmpty()) {
+            sql.append(" AND LOWER(author) LIKE LOWER(?)");
+            parameters.add("%" + authorFilter.trim() + "%");
+        }
+
+        // Filtr wydawnictwa
+        if (publisherFilter != null && !publisherFilter.trim().isEmpty()) {
+            sql.append(" AND LOWER(publisher) LIKE LOWER(?)");
+            parameters.add("%" + publisherFilter.trim() + "%");
+        }
+
+        // Filtr roku od
+        if (yearFrom != null && yearFrom > 0) {
+            sql.append(" AND year >= ?");
+            parameters.add(yearFrom);
+        }
+
+        // Filtr roku do
+        if (yearTo != null && yearTo > 0) {
+            sql.append(" AND year <= ?");
+            parameters.add(yearTo);
+        }
+
+        // Filtr dostępności
+        if (availableOnly != null) {
+            if (availableOnly) {
+                sql.append(" AND available = TRUE");
+            } else {
+                sql.append(" AND available = FALSE");
+            }
+        }
+
+        sql.append(" ORDER BY title");
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+
+            // Ustaw parametry
+            for (int i = 0; i < parameters.size(); i++) {
+                pstmt.setObject(i + 1, parameters.get(i));
+            }
+
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                Book book = mapResultSetToBook(rs);
+                books.add(book);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return books;
+    }
+
     public boolean addBook(Book book) {
         // Sprawdź czy książka już istnieje
         if (bookExists(book)) {

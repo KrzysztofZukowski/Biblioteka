@@ -23,6 +23,14 @@ public class AdminDashboard extends JFrame {
     private JList<Rental> rentalsList;
     private JList<ExtensionRequest> extensionRequestsList;
 
+    // Pola filtrów
+    private JTextField titleFilterField;
+    private JTextField authorFilterField;
+    private JTextField publisherFilterField;
+    private JTextField yearFromField;
+    private JTextField yearToField;
+    private JComboBox<String> availabilityFilterCombo;
+
     // Przyciski jako pola klasy
     private JButton logoutButton;
     private JButton addBookButton;
@@ -36,6 +44,8 @@ public class AdminDashboard extends JFrame {
     private JButton approveRequestButton;
     private JButton rejectRequestButton;
     private JButton refreshRequestsButton;
+    private JButton applyFiltersButton;
+    private JButton clearFiltersButton;
 
     public AdminDashboard(User user) {
         this.currentUser = user;
@@ -48,7 +58,7 @@ public class AdminDashboard extends JFrame {
     private void initializeComponents() {
         setTitle("Panel Administratora - " + currentUser.getUsername());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(900, 700);
+        setSize(1100, 750);
         setLocationRelativeTo(null);
 
         booksListModel = new DefaultListModel<>();
@@ -61,6 +71,14 @@ public class AdminDashboard extends JFrame {
         booksList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         rentalsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         extensionRequestsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+
+        // Inicjalizacja pól filtrów
+        titleFilterField = new JTextField(10);
+        authorFilterField = new JTextField(10);
+        publisherFilterField = new JTextField(10);
+        yearFromField = new JTextField(6);
+        yearToField = new JTextField(6);
+        availabilityFilterCombo = new JComboBox<>(new String[]{"Wszystkie", "Dostępne", "Wypożyczone"});
 
         // Inicjalizacja przycisków
         logoutButton = new JButton("Wyloguj");
@@ -75,6 +93,8 @@ public class AdminDashboard extends JFrame {
         approveRequestButton = new JButton("Zatwierdź");
         rejectRequestButton = new JButton("Odrzuć");
         refreshRequestsButton = new JButton("Odśwież");
+        applyFiltersButton = new JButton("Zastosuj filtry");
+        clearFiltersButton = new JButton("Wyczyść filtry");
 
         // Wyłącz przycisk skanowania na razie
         scanISBNButton.setEnabled(false);
@@ -96,9 +116,13 @@ public class AdminDashboard extends JFrame {
         // Panel główny z zakładkami
         JTabbedPane tabbedPane = new JTabbedPane();
 
-        // Zakładka "Zarządzanie książkami"
+        // Zakładka "Zarządzanie książkami" z filtrami
         JPanel booksPanel = new JPanel(new BorderLayout());
-        booksPanel.add(new JLabel("Wszystkie książki w systemie:"), BorderLayout.NORTH);
+
+        // Panel filtrów
+        JPanel filtersPanel = createFiltersPanel();
+        booksPanel.add(filtersPanel, BorderLayout.NORTH);
+
         booksPanel.add(new JScrollPane(booksList), BorderLayout.CENTER);
 
         JPanel booksButtonPanel = new JPanel(new FlowLayout());
@@ -140,6 +164,58 @@ public class AdminDashboard extends JFrame {
         add(tabbedPane, BorderLayout.CENTER);
     }
 
+    private JPanel createFiltersPanel() {
+        JPanel filtersPanel = new JPanel(new BorderLayout());
+        filtersPanel.setBorder(BorderFactory.createTitledBorder("Filtry wyszukiwania książek"));
+
+        // Panel z polami filtrów
+        JPanel fieldsPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+
+        // Pierwsza linia - Tytuł, Autor, Wydawnictwo
+        gbc.gridx = 0; gbc.gridy = 0;
+        fieldsPanel.add(new JLabel("Tytuł:"), gbc);
+        gbc.gridx = 1;
+        fieldsPanel.add(titleFilterField, gbc);
+
+        gbc.gridx = 2; gbc.gridy = 0;
+        fieldsPanel.add(new JLabel("Autor:"), gbc);
+        gbc.gridx = 3;
+        fieldsPanel.add(authorFilterField, gbc);
+
+        gbc.gridx = 4; gbc.gridy = 0;
+        fieldsPanel.add(new JLabel("Wydawnictwo:"), gbc);
+        gbc.gridx = 5;
+        fieldsPanel.add(publisherFilterField, gbc);
+
+        // Druga linia - Rok od, Rok do, Dostępność
+        gbc.gridx = 0; gbc.gridy = 1;
+        fieldsPanel.add(new JLabel("Rok od:"), gbc);
+        gbc.gridx = 1;
+        fieldsPanel.add(yearFromField, gbc);
+
+        gbc.gridx = 2; gbc.gridy = 1;
+        fieldsPanel.add(new JLabel("do:"), gbc);
+        gbc.gridx = 3;
+        fieldsPanel.add(yearToField, gbc);
+
+        gbc.gridx = 4; gbc.gridy = 1;
+        fieldsPanel.add(new JLabel("Status:"), gbc);
+        gbc.gridx = 5;
+        fieldsPanel.add(availabilityFilterCombo, gbc);
+
+        filtersPanel.add(fieldsPanel, BorderLayout.CENTER);
+
+        // Panel z przyciskami filtrów
+        JPanel filterButtonsPanel = new JPanel(new FlowLayout());
+        filterButtonsPanel.add(applyFiltersButton);
+        filterButtonsPanel.add(clearFiltersButton);
+        filtersPanel.add(filterButtonsPanel, BorderLayout.EAST);
+
+        return filtersPanel;
+    }
+
     private void setupEventHandlers() {
         // Event handlers dla przycisków
         logoutButton.addActionListener(e -> logout());
@@ -154,6 +230,15 @@ public class AdminDashboard extends JFrame {
         approveRequestButton.addActionListener(e -> approveExtensionRequest());
         rejectRequestButton.addActionListener(e -> rejectExtensionRequest());
         refreshRequestsButton.addActionListener(e -> loadExtensionRequests());
+        applyFiltersButton.addActionListener(e -> applyFilters());
+        clearFiltersButton.addActionListener(e -> clearFilters());
+
+        // Enter w polach filtrów
+        titleFilterField.addActionListener(e -> applyFilters());
+        authorFilterField.addActionListener(e -> applyFilters());
+        publisherFilterField.addActionListener(e -> applyFilters());
+        yearFromField.addActionListener(e -> applyFilters());
+        yearToField.addActionListener(e -> applyFilters());
 
         // Obsługa podwójnego kliknięcia
         booksList.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -179,6 +264,101 @@ public class AdminDashboard extends JFrame {
                 }
             }
         });
+    }
+
+    private void applyFilters() {
+        String titleFilter = titleFilterField.getText().trim();
+        String authorFilter = authorFilterField.getText().trim();
+        String publisherFilter = publisherFilterField.getText().trim();
+
+        Integer yearFrom = null;
+        Integer yearTo = null;
+        Boolean availableOnly = null;
+
+        // Parsowanie roku od
+        String yearFromText = yearFromField.getText().trim();
+        if (!yearFromText.isEmpty()) {
+            try {
+                yearFrom = Integer.parseInt(yearFromText);
+                if (yearFrom < 1000 || yearFrom > 2030) {
+                    JOptionPane.showMessageDialog(this,
+                            "Rok 'od' musi być między 1000 a 2030",
+                            "Błąd filtra",
+                            JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this,
+                        "Nieprawidłowy format roku 'od'",
+                        "Błąd filtra",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+        }
+
+        // Parsowanie roku do
+        String yearToText = yearToField.getText().trim();
+        if (!yearToText.isEmpty()) {
+            try {
+                yearTo = Integer.parseInt(yearToText);
+                if (yearTo < 1000 || yearTo > 2030) {
+                    JOptionPane.showMessageDialog(this,
+                            "Rok 'do' musi być między 1000 a 2030",
+                            "Błąd filtra",
+                            JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this,
+                        "Nieprawidłowy format roku 'do'",
+                        "Błąd filtra",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+        }
+
+        // Sprawdź czy rok od nie jest większy niż rok do
+        if (yearFrom != null && yearTo != null && yearFrom > yearTo) {
+            JOptionPane.showMessageDialog(this,
+                    "Rok 'od' nie może być większy niż rok 'do'",
+                    "Błąd filtra",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // Parsowanie filtru dostępności
+        String selectedAvailability = (String) availabilityFilterCombo.getSelectedItem();
+        if ("Dostępne".equals(selectedAvailability)) {
+            availableOnly = true;
+        } else if ("Wypożyczone".equals(selectedAvailability)) {
+            availableOnly = false;
+        }
+        // Dla "Wszystkie" pozostawiamy null
+
+        // Zastosuj filtry
+        booksListModel.clear();
+        List<Book> filteredBooks = bookService.searchBooksWithFilters(
+                titleFilter.isEmpty() ? null : titleFilter,
+                authorFilter.isEmpty() ? null : authorFilter,
+                publisherFilter.isEmpty() ? null : publisherFilter,
+                yearFrom,
+                yearTo,
+                availableOnly
+        );
+
+        for (Book book : filteredBooks) {
+            booksListModel.addElement(book);
+        }
+    }
+
+    private void clearFilters() {
+        titleFilterField.setText("");
+        authorFilterField.setText("");
+        publisherFilterField.setText("");
+        yearFromField.setText("");
+        yearToField.setText("");
+        availabilityFilterCombo.setSelectedIndex(0); // "Wszystkie"
+        loadBooks(); // Wczytaj wszystkie książki
     }
 
     private void loadData() {
