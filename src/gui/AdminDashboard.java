@@ -97,8 +97,8 @@ public class AdminDashboard extends JFrame {
         clearFiltersButton = new JButton("Wyczyść filtry");
 
         // Wyłącz przycisk skanowania na razie
-        scanISBNButton.setEnabled(false);
-        scanISBNButton.setToolTipText("Funkcja będzie dostępna wkrótce");
+//        scanISBNButton.setEnabled(false);
+//        scanISBNButton.setToolTipText("Funkcja będzie dostępna wkrótce");
 
         // Ustaw renderer dla rentals list aby pokazywać kolory
         rentalsList.setCellRenderer(new RentalListCellRenderer());
@@ -651,8 +651,24 @@ public class AdminDashboard extends JFrame {
     }
 
     private void scanISBN() {
-        // Placeholder dla funkcji skanowania ISBN
-        JOptionPane.showMessageDialog(this, "Funkcja skanowania ISBN będzie dodana później", "Informacja", JOptionPane.INFORMATION_MESSAGE);
+        ScanISBNDialog dialog = new ScanISBNDialog(this);
+        dialog.setVisible(true);
+
+        if (dialog.wasBookAdded()) {
+            Book book = dialog.getFoundBook();
+            if (book != null && bookService.addBook(book)) {
+                JOptionPane.showMessageDialog(this,
+                        "Książka została dodana!",
+                        "Sukces",
+                        JOptionPane.INFORMATION_MESSAGE);
+                loadBooks();
+            } else {
+                JOptionPane.showMessageDialog(this,
+                        "Nie można dodać książki. Może już istnieje w systemie.",
+                        "Błąd",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        }
     }
 
     private void logout() {
