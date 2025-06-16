@@ -10,5 +10,7 @@
     <orderEntry type="library" name="javafx-swt" level="project" />
     <orderEntry type="library" name="sqlite-jdbc-3.49.1.0" level="project" />
     <orderEntry type="library" name="gson-2.10.1" level="project" />
+    <orderEntry type="library" name="commons-beanutils-1.9.2" level="project" />
+    <orderEntry type="library" name="tess4j-3.4.8" level="project" />
   </component>
 </module>

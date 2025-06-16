@@ -2,18 +2,31 @@ package gui;
 
 import models.Book;
 import util.GoogleBooksAPI;
+import net.sourceforge.tess4j.Tesseract;
+import net.sourceforge.tess4j.TesseractException;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.awt.image.ConvolveOp;
+import java.awt.image.Kernel;
+import java.awt.image.RescaleOp;
+import java.io.File;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class ScanISBNDialog extends JDialog {
     private JTextField searchField;
     private JRadioButton isbnRadio;
     private JRadioButton generalRadio;
     private JButton searchButton;
+    private JButton scanImageButton;
     private JButton cancelButton;
     private JProgressBar progressBar;
     private JLabel statusLabel;
+    private JLabel imageLabel;
 
     // Form fields
     private JTextField titleField;
@@ -25,16 +38,17 @@ public class ScanISBNDialog extends JDialog {
 
     private Book foundBook = null;
     private boolean bookAdded = false;
+    private BufferedImage currentImage = null;
 
     public ScanISBNDialog(Frame parent) {
-        super(parent, "Wyszukaj książkę", true);
+        super(parent, "Wyszukaj/Skanuj książkę", true);
         initializeComponents();
         setupLayout();
         setupEventHandlers();
     }
 
     private void initializeComponents() {
-        setSize(550, 500);
+        setSize(700, 650);
         setLocationRelativeTo(getParent());
         setResizable(false);
 
@@ -46,10 +60,15 @@ public class ScanISBNDialog extends JDialog {
         group.add(generalRadio);
 
         searchButton = new JButton("Szukaj");
+        scanImageButton = new JButton("Skanuj obraz ISBN");
         cancelButton = new JButton("Anuluj");
         progressBar = new JProgressBar();
         progressBar.setVisible(false);
         statusLabel = new JLabel(" ");
+
+        imageLabel = new JLabel("Wybierz obraz do skanowania", SwingConstants.CENTER);
+        imageLabel.setPreferredSize(new Dimension(300, 150));
+        imageLabel.setBorder(BorderFactory.createEtchedBorder());
 
         titleField = new JTextField(25);
         authorField = new JTextField(25);
@@ -64,13 +83,14 @@ public class ScanISBNDialog extends JDialog {
     private void setupLayout() {
         setLayout(new BorderLayout());
 
-        // Top panel - Search
+        // Top panel - Search and OCR
         JPanel topPanel = new JPanel(new GridBagLayout());
-        topPanel.setBorder(BorderFactory.createTitledBorder("Wyszukiwanie"));
+        topPanel.setBorder(BorderFactory.createTitledBorder("Wyszukiwanie / Skanowanie"));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
 
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        // Search section
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 3;
         topPanel.add(isbnRadio, gbc);
 
         gbc.gridy = 1;
@@ -79,16 +99,28 @@ public class ScanISBNDialog extends JDialog {
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1;
         topPanel.add(new JLabel("Szukaj:"), gbc);
 
-        gbc.gridx = 1;
+        gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
         topPanel.add(searchField, gbc);
 
-        gbc.gridx = 2;
+        gbc.gridx = 2; gbc.fill = GridBagConstraints.NONE;
         topPanel.add(searchButton, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 3;
+        // OCR section
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
+        topPanel.add(new JLabel("Lub skanuj:"), gbc);
+
+        gbc.gridx = 1; gbc.gridwidth = 2;
+        topPanel.add(scanImageButton, gbc);
+
+        // Image preview
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 3; gbc.fill = GridBagConstraints.BOTH;
+        topPanel.add(imageLabel, gbc);
+
+        // Progress and status
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 3; gbc.fill = GridBagConstraints.HORIZONTAL;
         topPanel.add(progressBar, gbc);
 
-        gbc.gridy = 4;
+        gbc.gridy = 6;
         topPanel.add(statusLabel, gbc);
 
         add(topPanel, BorderLayout.NORTH);
@@ -137,6 +169,7 @@ public class ScanISBNDialog extends JDialog {
 
     private void setupEventHandlers() {
         searchButton.addActionListener(e -> searchBook());
+        scanImageButton.addActionListener(e -> scanImage());
         cancelButton.addActionListener(e -> dispose());
         addButton.addActionListener(e -> addBookToLibrary());
         searchField.addActionListener(e -> searchBook());
@@ -144,6 +177,180 @@ public class ScanISBNDialog extends JDialog {
         // Update search field hint based on radio selection
         isbnRadio.addActionListener(e -> searchField.setToolTipText("Np. 9788375748116"));
         generalRadio.addActionListener(e -> searchField.setToolTipText("Np. Władca Pierścieni"));
+    }
+
+    private void scanImage() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileFilter(new FileNameExtensionFilter(
+                "Pliki obrazów (*.jpg, *.png, *.bmp, *.gif)",
+                "jpg", "jpeg", "png", "bmp", "gif"));
+
+        int result = chooser.showOpenDialog(this);
+        if (result != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        File imageFile = chooser.getSelectedFile();
+
+        // Disable UI
+        scanImageButton.setEnabled(false);
+        searchButton.setEnabled(false);
+        progressBar.setVisible(true);
+        progressBar.setIndeterminate(true);
+        statusLabel.setText("Ładowanie i przetwarzanie obrazu...");
+        setFormEnabled(false);
+        clearForm();
+
+        SwingWorker<String, Void> worker = new SwingWorker<>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                // Load and display image
+                BufferedImage image = ImageIO.read(imageFile);
+                currentImage = image;
+
+                SwingUtilities.invokeLater(() -> {
+                    displayImage(image);
+                    statusLabel.setText("Rozpoznawanie tekstu...");
+                });
+
+                // Perform OCR
+                return performOCR(image);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String isbn = get();
+                    if (isbn != null && !isbn.isEmpty()) {
+                        statusLabel.setText("Znaleziono ISBN: " + isbn);
+                        statusLabel.setForeground(new Color(0, 128, 0));
+
+                        // Set ISBN in search field and search automatically
+                        searchField.setText(isbn);
+                        isbnRadio.setSelected(true);
+
+                        // Auto-search for the book
+                        searchBookWithISBN(isbn);
+                    } else {
+                        statusLabel.setText("Nie znaleziono ISBN na obrazie");
+                        statusLabel.setForeground(Color.RED);
+                        setFormEnabled(true);
+                    }
+                } catch (Exception e) {
+                    statusLabel.setText("Błąd podczas skanowania: " + e.getMessage());
+                    statusLabel.setForeground(Color.RED);
+                    e.printStackTrace();
+                } finally {
+                    scanImageButton.setEnabled(true);
+                    searchButton.setEnabled(true);
+                    progressBar.setVisible(false);
+                    progressBar.setIndeterminate(false);
+                }
+            }
+        };
+
+        worker.execute();
+    }
+
+    private String performOCR(BufferedImage image) throws TesseractException {
+        Tesseract tesseract = new Tesseract();
+
+        try {
+            // Configure Tesseract
+            tesseract.setDatapath("./tessdata");
+            tesseract.setLanguage("eng");
+            tesseract.setPageSegMode(7);  // Single text line
+            tesseract.setTessVariable("tessedit_char_whitelist", "0123456789- X");
+            tesseract.setTessVariable("user_defined_dpi", "300");
+
+            // Try OCR on original image first
+            String text = tesseract.doOCR(image);
+            String isbn = extractISBN(text);
+
+            if (isbn != null) {
+                return isbn;
+            }
+
+            // If no ISBN found, try with enhanced image
+            BufferedImage enhanced = enhanceImage(image);
+            String enhancedText = tesseract.doOCR(enhanced);
+            return extractISBN(enhancedText);
+
+        } catch (Exception e) {
+            // Fallback if tessdata not found - show helpful message
+            throw new TesseractException("Nie można uruchomić OCR. " +
+                    "Upewnij się, że folder 'tessdata' znajduje się w katalogu aplikacji " +
+                    "i zawiera pliki językowe Tesseract.");
+        }
+    }
+
+    private BufferedImage enhanceImage(BufferedImage original) {
+        // Create enhanced copy
+        BufferedImage enhanced = new BufferedImage(
+                original.getWidth(), original.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = enhanced.createGraphics();
+        g.drawImage(original, 0, 0, null);
+        g.dispose();
+
+        // Increase contrast
+        float[] scales = {1.3f, 1.3f, 1.3f};
+        float[] offsets = {-20f, -20f, -20f};
+        RescaleOp rescaleOp = new RescaleOp(scales, offsets, null);
+        enhanced = rescaleOp.filter(enhanced, null);
+
+        // Sharpen image
+        float[] sharpenMatrix = {
+                0, -0.5f, 0,
+                -0.5f, 3f, -0.5f,
+                0, -0.5f, 0
+        };
+        ConvolveOp sharpenOp = new ConvolveOp(new Kernel(3, 3, sharpenMatrix));
+        enhanced = sharpenOp.filter(enhanced, null);
+
+        return enhanced;
+    }
+
+    private void displayImage(BufferedImage image) {
+        int maxDisplayWidth = 280;
+        int maxDisplayHeight = 140;
+
+        double scaleFactor = Math.min(
+                (double)maxDisplayWidth / image.getWidth(),
+                (double)maxDisplayHeight / image.getHeight());
+
+        int scaledWidth = (int)(image.getWidth() * scaleFactor);
+        int scaledHeight = (int)(image.getHeight() * scaleFactor);
+
+        Image scaledImage = image.getScaledInstance(scaledWidth, scaledHeight, Image.SCALE_SMOOTH);
+        imageLabel.setIcon(new ImageIcon(scaledImage));
+        imageLabel.setText("");
+    }
+
+    private String extractISBN(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+
+        // Remove all non-digit characters except X (for ISBN-10)
+        String cleaned = text.replaceAll("[^0-9X]", "");
+
+        // First try to find ISBN-13 (978/979 + 10 digits)
+        Pattern pattern13 = Pattern.compile("97[89]\\d{10}");
+        Matcher matcher13 = pattern13.matcher(cleaned);
+
+        if (matcher13.find()) {
+            return matcher13.group();
+        }
+
+        // If no ISBN-13 found, try ISBN-10 (9 digits + digit or X)
+        Pattern pattern10 = Pattern.compile("\\d{9}[0-9X]");
+        Matcher matcher10 = pattern10.matcher(cleaned);
+
+        if (matcher10.find()) {
+            return matcher10.group();
+        }
+
+        return null;
     }
 
     private void searchBook() {
@@ -156,7 +363,24 @@ public class ScanISBNDialog extends JDialog {
             return;
         }
 
+        if (isbnRadio.isSelected()) {
+            searchBookWithISBN(query);
+        } else {
+            searchBookGeneral(query);
+        }
+    }
+
+    private void searchBookWithISBN(String isbn) {
+        performBookSearch(isbn, true);
+    }
+
+    private void searchBookGeneral(String query) {
+        performBookSearch(query, false);
+    }
+
+    private void performBookSearch(String query, boolean isISBN) {
         searchButton.setEnabled(false);
+        scanImageButton.setEnabled(false);
         searchField.setEnabled(false);
         progressBar.setVisible(true);
         progressBar.setIndeterminate(true);
@@ -167,7 +391,7 @@ public class ScanISBNDialog extends JDialog {
         SwingWorker<Book, Void> worker = new SwingWorker<>() {
             @Override
             protected Book doInBackground() throws Exception {
-                return GoogleBooksAPI.searchBook(query, isbnRadio.isSelected());
+                return GoogleBooksAPI.searchBook(query, isISBN);
             }
 
             @Override
@@ -186,7 +410,7 @@ public class ScanISBNDialog extends JDialog {
                         setFormEnabled(true);
 
                         // If ISBN search, keep the ISBN
-                        if (isbnRadio.isSelected()) {
+                        if (isISBN) {
                             isbnResultField.setText(query.replaceAll("[^0-9X]", ""));
                         }
                     }
@@ -196,6 +420,7 @@ public class ScanISBNDialog extends JDialog {
                     e.printStackTrace();
                 } finally {
                     searchButton.setEnabled(true);
+                    scanImageButton.setEnabled(true);
                     searchField.setEnabled(true);
                     progressBar.setVisible(false);
                     progressBar.setIndeterminate(false);
@@ -263,7 +488,7 @@ public class ScanISBNDialog extends JDialog {
             }
         }
 
-        Book bookToAdd = new Book(isbn, title, author, publisher, year);
+        Book bookToAdd = new Book(isbn.isEmpty() ? null : isbn, title, author, publisher, year);
         this.foundBook = bookToAdd;
         this.bookAdded = true;
 
