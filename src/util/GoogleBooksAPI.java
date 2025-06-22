@@ -43,18 +43,31 @@ public class GoogleBooksAPI {
 
         // Try 1: with isbn: prefix
         book = performSearch("isbn:" + isbn);
+        if (book != null && book.getPublisher() != null) {
+            return book; // Mamy wydawnictwo, zwróć wynik
+        }
 
         // Try 2: just the number
-        if (book == null) {
-            book = performSearch(isbn);
+        Book book2 = performSearch(isbn);
+        if (book2 != null) {
+            // Jeśli druga próba ma wydawnictwo, a pierwsza nie
+            if (book2.getPublisher() != null && (book == null || book.getPublisher() == null)) {
+                return book2;
+            }
+            // W przeciwnym razie zwróć pierwszą próbę (może mieć inne dane)
+            return book != null ? book : book2;
         }
 
         // Try 3: in quotes
-        if (book == null) {
-            book = performSearch("\"" + isbn + "\"");
+        Book book3 = performSearch("\"" + isbn + "\"");
+        if (book3 != null) {
+            if (book3.getPublisher() != null) {
+                return book3;
+            }
         }
 
-        return book;
+        // Zwróć najlepszy wynik jaki mamy
+        return book != null ? book : (book2 != null ? book2 : book3);
     }
 
     private static Book searchByGeneral(String query) throws Exception {
@@ -64,8 +77,6 @@ public class GoogleBooksAPI {
     private static Book performSearch(String query) throws Exception {
         String encodedQuery = URLEncoder.encode(query, "UTF-8");
         String urlString = BASE_URL + "?q=" + encodedQuery + "&key=" + API_KEY + "&maxResults=1";
-
-        System.out.println("Searching: " + query);
 
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -103,10 +114,14 @@ public class GoogleBooksAPI {
             JsonObject firstBook = items.get(0).getAsJsonObject();
             JsonObject volumeInfo = firstBook.getAsJsonObject("volumeInfo");
 
+            // Debug: wyświetl całe volumeInfo tylko jeśli potrzebne
+            // System.out.println("Volume Info JSON: " + volumeInfo.toString());
+
             Book book = new Book();
 
             // Title
-            book.setTitle(getJsonString(volumeInfo, "title"));
+            String title = getJsonString(volumeInfo, "title");
+            book.setTitle(title);
 
             // Authors
             JsonArray authors = volumeInfo.getAsJsonArray("authors");
@@ -119,14 +134,32 @@ public class GoogleBooksAPI {
                 book.setAuthor(authorStr.toString());
             }
 
-            // Publisher
-            book.setPublisher(getJsonString(volumeInfo, "publisher"));
+            // Publisher - spróbuj różnych pól
+            String publisher = getJsonString(volumeInfo, "publisher");
+
+            // Jeśli nie ma standardowego publisher, sprawdź inne możliwe pola
+            if (publisher == null || publisher.trim().isEmpty()) {
+                // Spróbuj alternaty wymnych nazw pól
+                if (volumeInfo.has("publishedBy")) {
+                    publisher = getJsonString(volumeInfo, "publishedBy");
+                }
+                if (publisher == null && volumeInfo.has("imprint")) {
+                    publisher = getJsonString(volumeInfo, "imprint");
+                }
+            }
+
+            book.setPublisher(publisher);
+
+            if (publisher == null) {
+                System.out.println("⚠️  Brak danych o wydawnictwie w API - będzie można wpisać ręcznie");
+            }
 
             // Year
             String publishedDate = getJsonString(volumeInfo, "publishedDate");
             if (publishedDate != null && publishedDate.length() >= 4) {
                 try {
-                    book.setYear(Integer.parseInt(publishedDate.substring(0, 4)));
+                    int year = Integer.parseInt(publishedDate.substring(0, 4));
+                    book.setYear(year);
                 } catch (NumberFormatException e) {
                     // Ignore
                 }
@@ -150,7 +183,8 @@ public class GoogleBooksAPI {
                     }
                 }
 
-                book.setIsbn(isbn13 != null ? isbn13 : isbn10);
+                String finalIsbn = isbn13 != null ? isbn13 : isbn10;
+                book.setIsbn(finalIsbn);
             }
 
             return book;

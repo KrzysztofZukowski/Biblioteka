@@ -4,78 +4,75 @@ import models.Book;
 import util.GoogleBooksAPI;
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
+import com.google.zxing.*;
+import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
+import com.google.zxing.common.HybridBinarizer;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.awt.Dimension;
 import java.awt.image.BufferedImage;
-import java.awt.image.ConvolveOp;
-import java.awt.image.Kernel;
-import java.awt.image.RescaleOp;
 import java.io.File;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 
 public class ScanISBNDialog extends JDialog {
-    private JTextField searchField;
-    private JRadioButton isbnRadio;
-    private JRadioButton generalRadio;
-    private JButton searchButton;
-    private JButton scanImageButton;
+    private JButton selectImageButton;
     private JButton cancelButton;
-    private JProgressBar progressBar;
+    private JButton addBookButton;
+    private JLabel imagePreviewLabel;
     private JLabel statusLabel;
-    private JLabel imageLabel;
+    private JProgressBar progressBar;
 
-    // Form fields
+    // Wynik skanowania ISBN
+    private JTextField isbnField;
+    private JButton searchByISBNButton;
+
+    // Formularz książki
     private JTextField titleField;
     private JTextField authorField;
     private JTextField publisherField;
     private JTextField yearField;
-    private JTextField isbnResultField;
-    private JButton addButton;
 
     private Book foundBook = null;
     private boolean bookAdded = false;
-    private BufferedImage currentImage = null;
 
     public ScanISBNDialog(Frame parent) {
-        super(parent, "Wyszukaj/Skanuj książkę", true);
+        super(parent, "Skanuj ISBN z obrazu", true);
         initializeComponents();
         setupLayout();
         setupEventHandlers();
     }
 
     private void initializeComponents() {
-        setSize(700, 650);
+        setSize(500, 600);
         setLocationRelativeTo(getParent());
         setResizable(false);
 
-        searchField = new JTextField(25);
-        isbnRadio = new JRadioButton("Szukaj po ISBN", true);
-        generalRadio = new JRadioButton("Szukaj po tytule/autorze");
-        ButtonGroup group = new ButtonGroup();
-        group.add(isbnRadio);
-        group.add(generalRadio);
-
-        searchButton = new JButton("Szukaj");
-        scanImageButton = new JButton("Skanuj obraz ISBN");
+        selectImageButton = new JButton("Wybierz obraz");
         cancelButton = new JButton("Anuluj");
+        addBookButton = new JButton("Dodaj książkę");
+
+        imagePreviewLabel = new JLabel("Wybierz obraz do skanowania", SwingConstants.CENTER);
+        imagePreviewLabel.setPreferredSize(new Dimension(300, 200));
+        imagePreviewLabel.setBorder(BorderFactory.createEtchedBorder());
+
+        statusLabel = new JLabel(" ", SwingConstants.CENTER);
         progressBar = new JProgressBar();
         progressBar.setVisible(false);
-        statusLabel = new JLabel(" ");
 
-        imageLabel = new JLabel("Wybierz obraz do skanowania", SwingConstants.CENTER);
-        imageLabel.setPreferredSize(new Dimension(300, 150));
-        imageLabel.setBorder(BorderFactory.createEtchedBorder());
+        isbnField = new JTextField(20);
+        isbnField.setToolTipText("Możesz edytować ISBN jeśli został błędnie odczytany");
+        searchByISBNButton = new JButton("Szukaj");
+        searchByISBNButton.setEnabled(false);
 
-        titleField = new JTextField(25);
-        authorField = new JTextField(25);
-        publisherField = new JTextField(25);
+        titleField = new JTextField(20);
+        authorField = new JTextField(20);
+        publisherField = new JTextField(20);
         yearField = new JTextField(10);
-        isbnResultField = new JTextField(25);
-        addButton = new JButton("Dodaj do biblioteki");
 
         setFormEnabled(false);
     }
@@ -83,137 +80,161 @@ public class ScanISBNDialog extends JDialog {
     private void setupLayout() {
         setLayout(new BorderLayout());
 
-        // Top panel - Search and OCR
-        JPanel topPanel = new JPanel(new GridBagLayout());
-        topPanel.setBorder(BorderFactory.createTitledBorder("Wyszukiwanie / Skanowanie"));
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
+        // Panel górny - wybór obrazu i podgląd
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBorder(BorderFactory.createTitledBorder("Skanowanie obrazu"));
 
-        // Search section
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 3;
-        topPanel.add(isbnRadio, gbc);
+        // Informacja o sposobie działania
+        JLabel infoLabel = new JLabel(
+                "<html><center>System automatycznie:<br>" +
+                        "1. Wyszuka kody kreskowe na obrazie<br>" +
+                        "2. Jeśli nie znajdzie - użyje OCR do odczytu tekstu</center></html>",
+                SwingConstants.CENTER);
+        infoLabel.setFont(infoLabel.getFont().deriveFont(Font.ITALIC, 11f));
+        topPanel.add(infoLabel, BorderLayout.NORTH);
 
-        gbc.gridy = 1;
-        topPanel.add(generalRadio, gbc);
+        JPanel buttonPanel = new JPanel(new FlowLayout());
+        buttonPanel.add(selectImageButton);
 
-        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1;
-        topPanel.add(new JLabel("Szukaj:"), gbc);
+        JPanel centerImagePanel = new JPanel(new BorderLayout());
+        centerImagePanel.add(buttonPanel, BorderLayout.NORTH);
+        centerImagePanel.add(imagePreviewLabel, BorderLayout.CENTER);
+        topPanel.add(centerImagePanel, BorderLayout.CENTER);
 
-        gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
-        topPanel.add(searchField, gbc);
-
-        gbc.gridx = 2; gbc.fill = GridBagConstraints.NONE;
-        topPanel.add(searchButton, gbc);
-
-        // OCR section
-        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1;
-        topPanel.add(new JLabel("Lub skanuj:"), gbc);
-
-        gbc.gridx = 1; gbc.gridwidth = 2;
-        topPanel.add(scanImageButton, gbc);
-
-        // Image preview
-        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 3; gbc.fill = GridBagConstraints.BOTH;
-        topPanel.add(imageLabel, gbc);
-
-        // Progress and status
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 3; gbc.fill = GridBagConstraints.HORIZONTAL;
-        topPanel.add(progressBar, gbc);
-
-        gbc.gridy = 6;
-        topPanel.add(statusLabel, gbc);
+        JPanel statusPanel = new JPanel(new BorderLayout());
+        statusPanel.add(statusLabel, BorderLayout.CENTER);
+        statusPanel.add(progressBar, BorderLayout.SOUTH);
+        topPanel.add(statusPanel, BorderLayout.SOUTH);
 
         add(topPanel, BorderLayout.NORTH);
 
-        // Center panel - Book details
+        // Panel środkowy - wyniki
         JPanel centerPanel = new JPanel(new GridBagLayout());
-        centerPanel.setBorder(BorderFactory.createTitledBorder("Szczegóły książki"));
-        gbc = new GridBagConstraints();
+        centerPanel.setBorder(BorderFactory.createTitledBorder("Wyniki skanowania"));
+        GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
         gbc.gridx = 0; gbc.gridy = 0;
+        centerPanel.add(new JLabel("Znaleziony ISBN:"), gbc);
+        gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
+        centerPanel.add(isbnField, gbc);
+        gbc.gridx = 2; gbc.fill = GridBagConstraints.NONE;
+        centerPanel.add(searchByISBNButton, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE;
         centerPanel.add(new JLabel("Tytuł:*"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
         centerPanel.add(titleField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE;
         centerPanel.add(new JLabel("Autor:*"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
         centerPanel.add(authorField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 2; gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 0; gbc.gridy = 3; gbc.fill = GridBagConstraints.NONE;
         centerPanel.add(new JLabel("Wydawnictwo:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
         centerPanel.add(publisherField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 3; gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 0; gbc.gridy = 4; gbc.fill = GridBagConstraints.NONE;
         centerPanel.add(new JLabel("Rok:"), gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
         centerPanel.add(yearField, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 4; gbc.fill = GridBagConstraints.NONE;
-        centerPanel.add(new JLabel("ISBN:"), gbc);
-        gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL;
-        centerPanel.add(isbnResultField, gbc);
-
         add(centerPanel, BorderLayout.CENTER);
 
-        // Bottom panel
+        // Panel dolny - przyciski
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottomPanel.add(addButton);
+        bottomPanel.add(addBookButton);
         bottomPanel.add(cancelButton);
-
         add(bottomPanel, BorderLayout.SOUTH);
     }
 
     private void setupEventHandlers() {
-        searchButton.addActionListener(e -> searchBook());
-        scanImageButton.addActionListener(e -> scanImage());
+        selectImageButton.addActionListener(e -> selectAndScanImage());
         cancelButton.addActionListener(e -> dispose());
-        addButton.addActionListener(e -> addBookToLibrary());
-        searchField.addActionListener(e -> searchBook());
+        addBookButton.addActionListener(e -> addBookToLibrary());
+        searchByISBNButton.addActionListener(e -> manualSearchByISBN());
 
-        // Update search field hint based on radio selection
-        isbnRadio.addActionListener(e -> searchField.setToolTipText("Np. 9788375748116"));
-        generalRadio.addActionListener(e -> searchField.setToolTipText("Np. Władca Pierścieni"));
+        // Umożliwienie wyszukania po wciśnięciu Enter w polu ISBN
+        isbnField.addActionListener(e -> manualSearchByISBN());
+
+        // Włączenie przycisku wyszukania gdy użytkownik wpisuje ISBN
+        isbnField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { checkISBNField(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { checkISBNField(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { checkISBNField(); }
+        });
     }
 
-    private void scanImage() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setFileFilter(new FileNameExtensionFilter(
-                "Pliki obrazów (*.jpg, *.png, *.bmp, *.gif)",
-                "jpg", "jpeg", "png", "bmp", "gif"));
+    private void checkISBNField() {
+        String isbn = isbnField.getText().trim();
+        searchByISBNButton.setEnabled(!isbn.isEmpty() && isValidISBNFormat(isbn));
+    }
 
-        int result = chooser.showOpenDialog(this);
+    private boolean isValidISBNFormat(String isbn) {
+        if (isbn == null || isbn.isEmpty()) {
+            return false;
+        }
+
+        // Usuń myślniki i spacje
+        String cleaned = isbn.replaceAll("[\\s-]", "");
+
+        // Sprawdź różne formaty ISBN
+        return cleaned.matches("\\d{10}") ||           // ISBN-10 bez znaku kontrolnego X
+                cleaned.matches("\\d{9}[0-9X]") ||      // ISBN-10 ze znakiem kontrolnym
+                cleaned.matches("97[89]\\d{10}");       // ISBN-13 (978 lub 979 + 10 cyfr)
+    }
+
+    private void selectAndScanImage() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setFileFilter(new FileNameExtensionFilter(
+                "Obrazy (*.jpg, *.png, *.bmp)", "jpg", "jpeg", "png", "bmp"));
+
+        int result = fileChooser.showOpenDialog(this);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }
 
-        File imageFile = chooser.getSelectedFile();
+        File imageFile = fileChooser.getSelectedFile();
+        scanImageForISBN(imageFile);
+    }
 
-        // Disable UI
-        scanImageButton.setEnabled(false);
-        searchButton.setEnabled(false);
+    private void scanImageForISBN(File imageFile) {
+        // Wyłącz interfejs podczas skanowania
+        selectImageButton.setEnabled(false);
         progressBar.setVisible(true);
         progressBar.setIndeterminate(true);
-        statusLabel.setText("Ładowanie i przetwarzanie obrazu...");
-        setFormEnabled(false);
+        statusLabel.setText("Ładowanie obrazu...");
         clearForm();
 
         SwingWorker<String, Void> worker = new SwingWorker<>() {
+            private BufferedImage image;
+
             @Override
             protected String doInBackground() throws Exception {
-                // Load and display image
-                BufferedImage image = ImageIO.read(imageFile);
-                currentImage = image;
+                // Wczytaj obraz
+                image = ImageIO.read(imageFile);
 
+                // Wyświetl podgląd w wątku EDT
                 SwingUtilities.invokeLater(() -> {
-                    displayImage(image);
-                    statusLabel.setText("Rozpoznawanie tekstu...");
+                    displayImagePreview(image);
+                    statusLabel.setText("Szukanie kodu kreskowego...");
                 });
 
-                // Perform OCR
+                // Krok 1: Próba odczytu kodu kreskowego z ZXing
+                String barcodeResult = scanBarcode(image);
+                if (barcodeResult != null) {
+                    SwingUtilities.invokeLater(() ->
+                            statusLabel.setText("Znaleziono kod kreskowy, sprawdzanie ISBN..."));
+                    return barcodeResult;
+                }
+
+                // Krok 2: Jeśli ZXing zawodzi, użyj Tesseract OCR
+                SwingUtilities.invokeLater(() ->
+                        statusLabel.setText("Kod kreskowy nie znaleziony, używam OCR..."));
+
                 return performOCR(image);
             }
 
@@ -222,17 +243,21 @@ public class ScanISBNDialog extends JDialog {
                 try {
                     String isbn = get();
                     if (isbn != null && !isbn.isEmpty()) {
-                        statusLabel.setText("Znaleziono ISBN: " + isbn);
+                        isbnField.setText(isbn);
+                        searchByISBNButton.setEnabled(true);
+
+                        // Sprawdź czy to rezultat kodu kreskowego czy OCR
+                        if (isbn.length() == 13 && (isbn.startsWith("978") || isbn.startsWith("979"))) {
+                            statusLabel.setText("Znaleziono kod kreskowy ISBN: " + isbn);
+                        } else {
+                            statusLabel.setText("OCR znalazł ISBN: " + isbn);
+                        }
                         statusLabel.setForeground(new Color(0, 128, 0));
 
-                        // Set ISBN in search field and search automatically
-                        searchField.setText(isbn);
-                        isbnRadio.setSelected(true);
-
-                        // Auto-search for the book
-                        searchBookWithISBN(isbn);
+                        // Automatyczne wyszukanie w API
+                        searchBookByISBN(isbn);
                     } else {
-                        statusLabel.setText("Nie znaleziono ISBN na obrazie");
+                        statusLabel.setText("Nie znaleziono ISBN (ani kod kreskowy, ani OCR)");
                         statusLabel.setForeground(Color.RED);
                         setFormEnabled(true);
                     }
@@ -241,10 +266,8 @@ public class ScanISBNDialog extends JDialog {
                     statusLabel.setForeground(Color.RED);
                     e.printStackTrace();
                 } finally {
-                    scanImageButton.setEnabled(true);
-                    searchButton.setEnabled(true);
+                    selectImageButton.setEnabled(true);
                     progressBar.setVisible(false);
-                    progressBar.setIndeterminate(false);
                 }
             }
         };
@@ -252,78 +275,116 @@ public class ScanISBNDialog extends JDialog {
         worker.execute();
     }
 
-    private String performOCR(BufferedImage image) throws TesseractException {
-        Tesseract tesseract = new Tesseract();
-
+    private String scanBarcode(BufferedImage image) {
         try {
-            // Configure Tesseract
-            tesseract.setDatapath("./tessdata");
-            tesseract.setLanguage("eng");
-            tesseract.setPageSegMode(7);  // Single text line
-            tesseract.setTessVariable("tessedit_char_whitelist", "0123456789- X");
-            tesseract.setTessVariable("user_defined_dpi", "300");
+            // Przygotuj obraz dla ZXing
+            LuminanceSource source = new BufferedImageLuminanceSource(image);
+            BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
 
-            // Try OCR on original image first
-            String text = tesseract.doOCR(image);
-            String isbn = extractISBN(text);
+            // Konfiguruj czytnik kodów kreskowych
+            MultiFormatReader reader = new MultiFormatReader();
 
-            if (isbn != null) {
-                return isbn;
+            // Spróbuj odczytać kod kreskowy
+            Result result = reader.decode(bitmap);
+            String barcodeText = result.getText();
+            BarcodeFormat format = result.getBarcodeFormat();
+
+            // Sprawdź czy to format który może zawierać ISBN
+            if (format == BarcodeFormat.EAN_13 || format == BarcodeFormat.EAN_8 ||
+                    format == BarcodeFormat.CODE_128 || format == BarcodeFormat.CODE_39) {
+
+                // Dla EAN-13 sprawdź czy zaczyna się od 978 lub 979 (książki)
+                if (format == BarcodeFormat.EAN_13 && (barcodeText.startsWith("978") || barcodeText.startsWith("979"))) {
+                    return barcodeText;
+                }
+
+                // Dla innych formatów sprawdź czy wygląda jak ISBN
+                if (isValidISBNFormat(barcodeText)) {
+                    return barcodeText;
+                }
             }
 
-            // If no ISBN found, try with enhanced image
-            BufferedImage enhanced = enhanceImage(image);
-            String enhancedText = tesseract.doOCR(enhanced);
-            return extractISBN(enhancedText);
+            return null; // Znaleziono kod kreskowy, ale to nie ISBN
 
+        } catch (NotFoundException e) {
+            // Nie znaleziono kodu kreskowego - to normalne, przejdź do OCR
+            return null;
         } catch (Exception e) {
-            // Fallback if tessdata not found - show helpful message
-            throw new TesseractException("Nie można uruchomić OCR. " +
-                    "Upewnij się, że folder 'tessdata' znajduje się w katalogu aplikacji " +
-                    "i zawiera pliki językowe Tesseract.");
+            // Inny błąd ZXing
+            System.err.println("Błąd ZXing: " + e.getMessage());
+            return null;
         }
     }
 
-    private BufferedImage enhanceImage(BufferedImage original) {
-        // Create enhanced copy
-        BufferedImage enhanced = new BufferedImage(
-                original.getWidth(), original.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = enhanced.createGraphics();
-        g.drawImage(original, 0, 0, null);
-        g.dispose();
+    private void manualSearchByISBN() {
+        String isbn = isbnField.getText().trim();
+        if (isbn.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "Proszę wprowadzić kod ISBN!",
+                    "Błąd",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
 
-        // Increase contrast
-        float[] scales = {1.3f, 1.3f, 1.3f};
-        float[] offsets = {-20f, -20f, -20f};
-        RescaleOp rescaleOp = new RescaleOp(scales, offsets, null);
-        enhanced = rescaleOp.filter(enhanced, null);
+        if (!isValidISBNFormat(isbn)) {
+            int choice = JOptionPane.showConfirmDialog(this,
+                    "Wprowadzony ISBN może być nieprawidłowy. Czy chcesz kontynuować wyszukiwanie?",
+                    "Ostrzeżenie",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) {
+                return;
+            }
+        }
 
-        // Sharpen image
-        float[] sharpenMatrix = {
-                0, -0.5f, 0,
-                -0.5f, 3f, -0.5f,
-                0, -0.5f, 0
-        };
-        ConvolveOp sharpenOp = new ConvolveOp(new Kernel(3, 3, sharpenMatrix));
-        enhanced = sharpenOp.filter(enhanced, null);
-
-        return enhanced;
+        // Wyczyść stary formularz i wyszukaj ponownie
+        clearBookForm();
+        searchBookByISBN(isbn);
     }
 
-    private void displayImage(BufferedImage image) {
-        int maxDisplayWidth = 280;
-        int maxDisplayHeight = 140;
+    private String performOCR(BufferedImage image) throws TesseractException {
+        try {
+            Tesseract tesseract = new Tesseract();
 
-        double scaleFactor = Math.min(
-                (double)maxDisplayWidth / image.getWidth(),
-                (double)maxDisplayHeight / image.getHeight());
+            // Podstawowa konfiguracja Tesseract
+            tesseract.setDatapath("./tessdata");
+            tesseract.setLanguage("eng");
+            tesseract.setPageSegMode(7); // Single text line
+            tesseract.setTessVariable("tessedit_char_whitelist", "0123456789X-");
 
-        int scaledWidth = (int)(image.getWidth() * scaleFactor);
-        int scaledHeight = (int)(image.getHeight() * scaleFactor);
+            // Podstawowe przetworzenie obrazu dla lepszej czytelności
+            BufferedImage processedImage = preprocessImage(image);
 
-        Image scaledImage = image.getScaledInstance(scaledWidth, scaledHeight, Image.SCALE_SMOOTH);
-        imageLabel.setIcon(new ImageIcon(scaledImage));
-        imageLabel.setText("");
+            // Wykonaj OCR
+            String text = tesseract.doOCR(processedImage);
+
+            // Wyodrębnij ISBN z tekstu
+            return extractISBN(text);
+
+        } catch (Exception e) {
+            throw new TesseractException("Błąd OCR: " + e.getMessage());
+        }
+    }
+
+    private BufferedImage preprocessImage(BufferedImage original) {
+        // Skalowanie do wyższej rozdzielczości (300 DPI)
+        int scaleFactor = 3;
+        int newWidth = original.getWidth() * scaleFactor;
+        int newHeight = original.getHeight() * scaleFactor;
+
+        BufferedImage scaled = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = scaled.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2d.drawImage(original, 0, 0, newWidth, newHeight, null);
+        g2d.dispose();
+
+        // Konwersja do skali szarości z zwiększonym kontrastem
+        BufferedImage grayscale = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_BYTE_GRAY);
+        Graphics2D g = grayscale.createGraphics();
+        g.drawImage(scaled, 0, 0, null);
+        g.dispose();
+
+        return grayscale;
     }
 
     private String extractISBN(String text) {
@@ -331,21 +392,19 @@ public class ScanISBNDialog extends JDialog {
             return null;
         }
 
-        // Remove all non-digit characters except X (for ISBN-10)
+        // Usuń wszystkie znaki oprócz cyfr i X
         String cleaned = text.replaceAll("[^0-9X]", "");
 
-        // First try to find ISBN-13 (978/979 + 10 digits)
-        Pattern pattern13 = Pattern.compile("97[89]\\d{10}");
-        Matcher matcher13 = pattern13.matcher(cleaned);
-
+        // Szukaj ISBN-13 (978/979 + 10 cyfr)
+        Pattern isbn13Pattern = Pattern.compile("97[89]\\d{10}");
+        Matcher matcher13 = isbn13Pattern.matcher(cleaned);
         if (matcher13.find()) {
             return matcher13.group();
         }
 
-        // If no ISBN-13 found, try ISBN-10 (9 digits + digit or X)
-        Pattern pattern10 = Pattern.compile("\\d{9}[0-9X]");
-        Matcher matcher10 = pattern10.matcher(cleaned);
-
+        // Szukaj ISBN-10 (9 cyfr + cyfra lub X)
+        Pattern isbn10Pattern = Pattern.compile("\\d{9}[0-9X]");
+        Matcher matcher10 = isbn10Pattern.matcher(cleaned);
         if (matcher10.find()) {
             return matcher10.group();
         }
@@ -353,45 +412,30 @@ public class ScanISBNDialog extends JDialog {
         return null;
     }
 
-    private void searchBook() {
-        String query = searchField.getText().trim();
-        if (query.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "Proszę wprowadzić dane do wyszukania!",
-                    "Błąd",
-                    JOptionPane.ERROR_MESSAGE);
-            return;
-        }
+    private void displayImagePreview(BufferedImage image) {
+        // Skaluj obraz do podglądu
+        int maxWidth = 280;
+        int maxHeight = 180;
 
-        if (isbnRadio.isSelected()) {
-            searchBookWithISBN(query);
-        } else {
-            searchBookGeneral(query);
-        }
+        double scaleX = (double) maxWidth / image.getWidth();
+        double scaleY = (double) maxHeight / image.getHeight();
+        double scale = Math.min(scaleX, scaleY);
+
+        int scaledWidth = (int) (image.getWidth() * scale);
+        int scaledHeight = (int) (image.getHeight() * scale);
+
+        Image scaledImage = image.getScaledInstance(scaledWidth, scaledHeight, Image.SCALE_SMOOTH);
+        imagePreviewLabel.setIcon(new ImageIcon(scaledImage));
+        imagePreviewLabel.setText("");
     }
 
-    private void searchBookWithISBN(String isbn) {
-        performBookSearch(isbn, true);
-    }
-
-    private void searchBookGeneral(String query) {
-        performBookSearch(query, false);
-    }
-
-    private void performBookSearch(String query, boolean isISBN) {
-        searchButton.setEnabled(false);
-        scanImageButton.setEnabled(false);
-        searchField.setEnabled(false);
-        progressBar.setVisible(true);
-        progressBar.setIndeterminate(true);
-        statusLabel.setText("Wyszukiwanie...");
-        setFormEnabled(false);
-        clearForm();
+    private void searchBookByISBN(String isbn) {
+        statusLabel.setText("Wyszukiwanie książki w API...");
 
         SwingWorker<Book, Void> worker = new SwingWorker<>() {
             @Override
             protected Book doInBackground() throws Exception {
-                return GoogleBooksAPI.searchBook(query, isISBN);
+                return GoogleBooksAPI.searchBook(isbn, true);
             }
 
             @Override
@@ -400,30 +444,33 @@ public class ScanISBNDialog extends JDialog {
                     Book book = get();
                     if (book != null) {
                         foundBook = book;
-                        populateForm(book);
-                        setFormEnabled(true);
-                        statusLabel.setText("Książka znaleziona!");
-                        statusLabel.setForeground(new Color(0, 128, 0));
-                    } else {
-                        statusLabel.setText("Nie znaleziono książki");
-                        statusLabel.setForeground(Color.RED);
+                        populateBookForm(book);
                         setFormEnabled(true);
 
-                        // If ISBN search, keep the ISBN
-                        if (isISBN) {
-                            isbnResultField.setText(query.replaceAll("[^0-9X]", ""));
+                        // Sprawdź czy wszystkie dane są dostępne
+                        boolean hasPublisher = book.getPublisher() != null && !book.getPublisher().trim().isEmpty();
+
+                        if (hasPublisher) {
+                            statusLabel.setText("Znaleziono dane książki!");
+                        } else {
+                            statusLabel.setText("Znaleziono książkę (brak danych o wydawnictwie - można wpisać ręcznie)");
+                        }
+                        statusLabel.setForeground(new Color(0, 128, 0));
+                    } else {
+                        statusLabel.setText("Nie znaleziono książki w API");
+                        statusLabel.setForeground(Color.ORANGE);
+                        setFormEnabled(true);
+
+                        // Pozostaw pole ISBN wypełnione dla ręcznego dodania
+                        if (!isbnField.getText().trim().isEmpty()) {
+                            statusLabel.setText(statusLabel.getText() + " - można dodać ręcznie");
                         }
                     }
                 } catch (Exception e) {
                     statusLabel.setText("Błąd połączenia z API");
                     statusLabel.setForeground(Color.RED);
+                    setFormEnabled(true);
                     e.printStackTrace();
-                } finally {
-                    searchButton.setEnabled(true);
-                    scanImageButton.setEnabled(true);
-                    searchField.setEnabled(true);
-                    progressBar.setVisible(false);
-                    progressBar.setIndeterminate(false);
                 }
             }
         };
@@ -431,21 +478,26 @@ public class ScanISBNDialog extends JDialog {
         worker.execute();
     }
 
-    private void populateForm(Book book) {
+    private void populateBookForm(Book book) {
         titleField.setText(book.getTitle() != null ? book.getTitle() : "");
         authorField.setText(book.getAuthor() != null ? book.getAuthor() : "");
         publisherField.setText(book.getPublisher() != null ? book.getPublisher() : "");
         yearField.setText(book.getYear() > 0 ? String.valueOf(book.getYear()) : "");
-        isbnResultField.setText(book.getIsbn() != null ? book.getIsbn() : "");
     }
 
     private void clearForm() {
+        isbnField.setText("");
+        clearBookForm();
+        searchByISBNButton.setEnabled(false);
+    }
+
+    private void clearBookForm() {
         titleField.setText("");
         authorField.setText("");
         publisherField.setText("");
         yearField.setText("");
-        isbnResultField.setText("");
         foundBook = null;
+        setFormEnabled(false);
     }
 
     private void setFormEnabled(boolean enabled) {
@@ -453,8 +505,14 @@ public class ScanISBNDialog extends JDialog {
         authorField.setEnabled(enabled);
         publisherField.setEnabled(enabled);
         yearField.setEnabled(enabled);
-        isbnResultField.setEnabled(enabled);
-        addButton.setEnabled(enabled);
+        addBookButton.setEnabled(enabled);
+
+        // Przycisk ISBN jest włączony tylko gdy jest tekst w polu ISBN
+        if (!enabled) {
+            searchByISBNButton.setEnabled(false);
+        } else {
+            checkISBNField();
+        }
     }
 
     private void addBookToLibrary() {
@@ -462,8 +520,9 @@ public class ScanISBNDialog extends JDialog {
         String author = authorField.getText().trim();
         String publisher = publisherField.getText().trim();
         String yearText = yearField.getText().trim();
-        String isbn = isbnResultField.getText().trim();
+        String isbn = isbnField.getText().trim();
 
+        // Walidacja wymaganych pól
         if (title.isEmpty() || author.isEmpty()) {
             JOptionPane.showMessageDialog(this,
                     "Tytuł i autor są wymagane!",
@@ -472,6 +531,7 @@ public class ScanISBNDialog extends JDialog {
             return;
         }
 
+        // Walidacja roku
         int year = 0;
         if (!yearText.isEmpty()) {
             try {
@@ -488,12 +548,12 @@ public class ScanISBNDialog extends JDialog {
             }
         }
 
-        Book bookToAdd = new Book(isbn.isEmpty() ? null : isbn, title, author, publisher, year);
-        this.foundBook = bookToAdd;
+        // Utwórz książkę do dodania
+        this.foundBook = new Book(isbn.isEmpty() ? null : isbn, title, author, publisher, year);
         this.bookAdded = true;
 
         JOptionPane.showMessageDialog(this,
-                "Dane książki są gotowe do dodania!",
+                "Książka jest gotowa do dodania do biblioteki!",
                 "Sukces",
                 JOptionPane.INFORMATION_MESSAGE);
 
