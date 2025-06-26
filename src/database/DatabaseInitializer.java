@@ -19,7 +19,7 @@ public class DatabaseInitializer {
         try (Connection conn = DatabaseManager.getConnection();
              Statement stmt = conn.createStatement()) {
 
-            // Tworzenie tabeli users
+            // Tworzenie tabeli users - zmieniono created_at na DATE
             String createUsersTable = """
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,12 +27,12 @@ public class DatabaseInitializer {
                     password VARCHAR(255) NOT NULL,
                     email VARCHAR(100),
                     is_admin BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at DATE DEFAULT (DATE('now'))
                 )
                 """;
             stmt.execute(createUsersTable);
 
-            // Tworzenie tabeli books
+            // Tworzenie tabeli books - zmieniono created_at na DATE
             String createBooksTable = """
                 CREATE TABLE IF NOT EXISTS books (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,12 +42,12 @@ public class DatabaseInitializer {
                     publisher VARCHAR(255),
                     year INTEGER,
                     available BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at DATE DEFAULT (DATE('now'))
                 )
                 """;
             stmt.execute(createBooksTable);
 
-            // Tworzenie tabeli rentals
+            // Tworzenie tabeli rentals - wszystkie daty jako DATE
             String createRentalsTable = """
                 CREATE TABLE IF NOT EXISTS rentals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,16 +64,16 @@ public class DatabaseInitializer {
                 """;
             stmt.execute(createRentalsTable);
 
-            // Tworzenie tabeli extension_requests dla próśb wymagających zgody admina
+            // Tworzenie tabeli extension_requests - zmieniono na DATE
             String createExtensionRequestsTable = """
                 CREATE TABLE IF NOT EXISTS extension_requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     rental_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     requested_days INTEGER NOT NULL,
-                    request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    request_date DATE DEFAULT (DATE('now')),
                     status VARCHAR(20) DEFAULT 'PENDING',
-                    admin_decision_date TIMESTAMP,
+                    admin_decision_date DATE,
                     admin_id INTEGER,
                     admin_comment TEXT,
                     FOREIGN KEY (rental_id) REFERENCES rentals(id),
@@ -98,11 +98,14 @@ public class DatabaseInitializer {
                 // Kolumna już istnieje - ignoruj błąd
             }
 
+            // Konwertuj istniejące dane TIMESTAMP na DATE
+            convertTimestampsToDate(conn);
+
             // Dodanie domyślnego administratora (tylko jeśli nie istnieje)
             if (!userExists(conn, "admin")) {
                 String insertAdmin = """
-                    INSERT INTO users (username, password, email, is_admin) 
-                    VALUES ('admin', 'admin123', 'admin@library.com', TRUE)
+                    INSERT INTO users (username, password, email, is_admin, created_at) 
+                    VALUES ('admin', 'admin123', 'admin@library.com', TRUE, DATE('now'))
                     """;
                 stmt.execute(insertAdmin);
                 System.out.println("Dodano domyślnego administratora.");
@@ -120,11 +123,56 @@ public class DatabaseInitializer {
             // Ustaw domyślną wartość extension_count dla istniejących wypożyczeń
             fixExtensionCount(conn);
 
-            System.out.println("Baza danych została zainicjalizowana!");
+            System.out.println("Baza danych została zainicjalizowana z ujednoliconymi datami!");
 
         } catch (Exception e) {
             e.printStackTrace();
             System.err.println("Błąd podczas inicjalizacji bazy danych: " + e.getMessage());
+        }
+    }
+
+    private static void convertTimestampsToDate(Connection conn) {
+        try (Statement stmt = conn.createStatement()) {
+            // Konwertuj created_at w users jeśli jest TIMESTAMP
+            String updateUsersCreatedAt = """
+                UPDATE users 
+                SET created_at = DATE(created_at) 
+                WHERE created_at IS NOT NULL 
+                AND created_at NOT LIKE '____-__-__'
+                """;
+            stmt.execute(updateUsersCreatedAt);
+
+            // Konwertuj created_at w books jeśli jest TIMESTAMP
+            String updateBooksCreatedAt = """
+                UPDATE books 
+                SET created_at = DATE(created_at) 
+                WHERE created_at IS NOT NULL 
+                AND created_at NOT LIKE '____-__-__'
+                """;
+            stmt.execute(updateBooksCreatedAt);
+
+            // Konwertuj request_date w extension_requests jeśli jest TIMESTAMP
+            String updateExtRequestDate = """
+                UPDATE extension_requests 
+                SET request_date = DATE(request_date) 
+                WHERE request_date IS NOT NULL 
+                AND request_date NOT LIKE '____-__-__'
+                """;
+            stmt.execute(updateExtRequestDate);
+
+            // Konwertuj admin_decision_date w extension_requests jeśli jest TIMESTAMP
+            String updateExtDecisionDate = """
+                UPDATE extension_requests 
+                SET admin_decision_date = DATE(admin_decision_date) 
+                WHERE admin_decision_date IS NOT NULL 
+                AND admin_decision_date NOT LIKE '____-__-__'
+                """;
+            stmt.execute(updateExtDecisionDate);
+
+            System.out.println("Przekonwertowano timestamps na daty.");
+
+        } catch (SQLException e) {
+            System.out.println("Informacja: Nie można przekonwertować wszystkich dat: " + e.getMessage());
         }
     }
 
@@ -141,7 +189,6 @@ public class DatabaseInitializer {
     }
 
     private static void removeDuplicateBooks(Connection conn) {
-        // Usuń duplikaty książek na podstawie ISBN (zachowaj najstarszą)
         String removeDuplicatesByISBN = """
             DELETE FROM books WHERE id NOT IN (
                 SELECT MIN(id) FROM books 
@@ -150,7 +197,6 @@ public class DatabaseInitializer {
             ) AND isbn IS NOT NULL AND isbn != ''
             """;
 
-        // Usuń duplikaty na podstawie tytuł+autor (zachowaj najstarszą)
         String removeDuplicatesByTitleAuthor = """
             DELETE FROM books WHERE id NOT IN (
                 SELECT MIN(id) FROM books 
@@ -207,11 +253,10 @@ public class DatabaseInitializer {
                 {"9788375780932", "Harry Potter i Kamień Filozoficzny", "J.K. Rowling", "Media Rodzina", "2016"}
         };
 
-        String insertSQL = "INSERT INTO books (isbn, title, author, publisher, year) VALUES (?, ?, ?, ?, ?)";
+        String insertSQL = "INSERT INTO books (isbn, title, author, publisher, year, created_at) VALUES (?, ?, ?, ?, ?, DATE('now'))";
 
         try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
             for (String[] book : sampleBooks) {
-                // Sprawdź zarówno ISBN jak i kombinację tytuł+autor
                 if (!bookExistsByISBN(conn, book[0]) && !bookExistsByTitleAuthor(conn, book[1], book[2])) {
                     pstmt.setString(1, book[0]); // ISBN
                     pstmt.setString(2, book[1]); // Title

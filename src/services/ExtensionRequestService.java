@@ -4,15 +4,13 @@ import database.DatabaseManager;
 import models.ExtensionRequest;
 
 import java.sql.*;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 public class ExtensionRequestService {
 
-
-     // Pobiera wszystkie prośby o przedłużenie dla danego użytkownika
-
+    // Pobiera wszystkie prośby o przedłużenie dla danego użytkownika
     public List<ExtensionRequest> getUserExtensionRequests(int userId) {
         List<ExtensionRequest> requests = new ArrayList<>();
         String sql = """
@@ -39,8 +37,8 @@ public class ExtensionRequestService {
         }
         return requests;
     }
-     // Pobiera wszystkie oczekujące prośby o przedłużenie
 
+    // Pobiera wszystkie oczekujące prośby o przedłużenie
     public List<ExtensionRequest> getPendingRequests() {
         List<ExtensionRequest> requests = new ArrayList<>();
         String sql = """
@@ -67,11 +65,9 @@ public class ExtensionRequestService {
         return requests;
     }
 
-
-     //Tworzy nową prośbę o przedłużenie
-
+    // Tworzy nową prośbę o przedłużenie
     public boolean createExtensionRequest(int rentalId, int userId, int requestedDays) {
-        // Sprawda czy nie ma już oczekującej prośby dla tego wypożyczenia
+        // Sprawdza czy nie ma już oczekującej prośby dla tego wypożyczenia
         if (hasPendingRequestForRental(rentalId)) {
             System.err.println("Już istnieje oczekująca prośba o przedłużenie dla tego wypożyczenia!");
             return false;
@@ -79,7 +75,7 @@ public class ExtensionRequestService {
 
         String sql = """
             INSERT INTO extension_requests (rental_id, user_id, requested_days, request_date, status) 
-            VALUES (?, ?, ?, ?, 'PENDING')
+            VALUES (?, ?, ?, DATE('now'), 'PENDING')
             """;
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -88,7 +84,6 @@ public class ExtensionRequestService {
             pstmt.setInt(1, rentalId);
             pstmt.setInt(2, userId);
             pstmt.setInt(3, requestedDays);
-            pstmt.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now()));
 
             int affectedRows = pstmt.executeUpdate();
             return affectedRows > 0;
@@ -98,8 +93,7 @@ public class ExtensionRequestService {
         }
     }
 
-     //Sprawdza czy istnieje już oczekująca prośba dla danego wypożyczenia
-
+    // Sprawdza czy istnieje już oczekująca prośba dla danego wypożyczenia
     private boolean hasPendingRequestForRental(int rentalId) {
         String sql = "SELECT COUNT(*) FROM extension_requests WHERE rental_id = ? AND status = 'PENDING'";
 
@@ -115,12 +109,12 @@ public class ExtensionRequestService {
             return false;
         }
     }
-     //Przetwarza prośbę o przedłużenie (zatwierdza lub odrzuca)
 
+    // Przetwarza prośbę o przedłużenie (zatwierdza lub odrzuca)
     public boolean processRequest(int requestId, int adminId, String status, String comment) {
         String sql = """
             UPDATE extension_requests 
-            SET status = ?, admin_decision_date = ?, admin_id = ?, admin_comment = ?
+            SET status = ?, admin_decision_date = DATE('now'), admin_id = ?, admin_comment = ?
             WHERE id = ? AND status = 'PENDING'
             """;
 
@@ -128,10 +122,9 @@ public class ExtensionRequestService {
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
             pstmt.setString(1, status);
-            pstmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
-            pstmt.setInt(3, adminId);
-            pstmt.setString(4, comment);
-            pstmt.setInt(5, requestId);
+            pstmt.setInt(2, adminId);
+            pstmt.setString(3, comment);
+            pstmt.setInt(4, requestId);
 
             int affectedRows = pstmt.executeUpdate();
             return affectedRows > 0;
@@ -141,8 +134,7 @@ public class ExtensionRequestService {
         }
     }
 
-    //Pobiera szczegóły prośby o przedłużenie
-
+    // Pobiera szczegóły prośby o przedłużenie
     public ExtensionRequest getRequestById(int requestId) {
         String sql = """
             SELECT er.*, u.username, b.title as book_title, b.author as book_author
@@ -168,8 +160,7 @@ public class ExtensionRequestService {
         return null;
     }
 
-     // Pobiera liczbę oczekujących próśb
-
+    // Pobiera liczbę oczekujących próśb
     public int getPendingRequestsCount() {
         String sql = "SELECT COUNT(*) FROM extension_requests WHERE status = 'PENDING'";
 
@@ -185,20 +176,19 @@ public class ExtensionRequestService {
         }
         return 0;
     }
-      //Usuwa stare, przetworzone prośby (starsze niż określona liczba dni)
+
+    // Usuwa stare, przetworzone prośby (starsze niż określona liczba dni)
     public int cleanupOldRequests(int daysOld) {
         String sql = """
             DELETE FROM extension_requests 
             WHERE status != 'PENDING' 
-            AND admin_decision_date < ?
+            AND admin_decision_date < DATE('now', '-' || ? || ' days')
             """;
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-            LocalDateTime cutoffDate = LocalDateTime.now().minusDays(daysOld);
-            pstmt.setTimestamp(1, Timestamp.valueOf(cutoffDate));
-
+            pstmt.setInt(1, daysOld);
             return pstmt.executeUpdate();
         } catch (SQLException e) {
             e.printStackTrace();
@@ -213,16 +203,26 @@ public class ExtensionRequestService {
         request.setUserId(rs.getInt("user_id"));
         request.setRequestedDays(rs.getInt("requested_days"));
 
-        Timestamp requestDate = rs.getTimestamp("request_date");
-        if (requestDate != null) {
-            request.setRequestDate(requestDate.toLocalDateTime());
+        // Bezpieczne odczytywanie request_date
+        String requestDateStr = rs.getString("request_date");
+        if (requestDateStr != null && !requestDateStr.trim().isEmpty()) {
+            try {
+                request.setRequestDate(LocalDate.parse(requestDateStr));
+            } catch (Exception e) {
+                request.setRequestDate(LocalDate.now());
+            }
         }
 
         request.setStatus(rs.getString("status"));
 
-        Timestamp adminDecisionDate = rs.getTimestamp("admin_decision_date");
-        if (adminDecisionDate != null) {
-            request.setAdminDecisionDate(adminDecisionDate.toLocalDateTime());
+        // Bezpieczne odczytywanie admin_decision_date
+        String adminDecisionDateStr = rs.getString("admin_decision_date");
+        if (adminDecisionDateStr != null && !adminDecisionDateStr.trim().isEmpty()) {
+            try {
+                request.setAdminDecisionDate(LocalDate.parse(adminDecisionDateStr));
+            } catch (Exception e) {
+                // Pozostaw null jeśli parsowanie się nie uda
+            }
         }
 
         try {

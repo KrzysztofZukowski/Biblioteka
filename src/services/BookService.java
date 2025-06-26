@@ -4,6 +4,7 @@ import database.DatabaseManager;
 import models.Book;
 
 import java.sql.*;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -116,10 +117,7 @@ public class BookService {
     }
 
     public boolean addBook(Book book) {
-        // USUNIĘTO sprawdzanie duplikatów po ISBN
-        // Biblioteka może mieć kilka egzemplarzy tej samej książki!
-
-        String sql = "INSERT INTO books (isbn, title, author, publisher, year, available) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO books (isbn, title, author, publisher, year, available, created_at) VALUES (?, ?, ?, ?, ?, ?, DATE('now'))";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -310,7 +308,20 @@ public class BookService {
         book.setPublisher(rs.getString("publisher"));
         book.setYear(rs.getInt("year"));
         book.setAvailable(rs.getBoolean("available"));
-        book.setCreatedAt(rs.getString("created_at"));
+
+        // Bezpieczne odczytywanie created_at - używamy getString zamiast getDate
+        String createdAtStr = rs.getString("created_at");
+        if (createdAtStr != null && !createdAtStr.trim().isEmpty()) {
+            try {
+                book.setCreatedAt(LocalDate.parse(createdAtStr));
+            } catch (Exception e) {
+                // Jeśli parsowanie się nie uda, ustaw obecną datę
+                book.setCreatedAt(LocalDate.now());
+            }
+        } else {
+            book.setCreatedAt(LocalDate.now());
+        }
+
         return book;
     }
 }

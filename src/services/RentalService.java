@@ -6,7 +6,6 @@ import models.ExtensionRequest;
 
 import java.sql.*;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -77,15 +76,13 @@ public class RentalService {
             FROM rentals r 
             JOIN users u ON r.user_id = u.id 
             JOIN books b ON r.book_id = b.id 
-            WHERE r.status = 'ACTIVE' AND r.expected_return_date < ?
+            WHERE r.status = 'ACTIVE' AND r.expected_return_date < DATE('now')
             ORDER BY r.expected_return_date ASC
             """;
 
         try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setDate(1, Date.valueOf(LocalDate.now()));
-            ResultSet rs = pstmt.executeQuery();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
 
             while (rs.next()) {
                 Rental rental = mapResultSetToRental(rs);
@@ -105,25 +102,22 @@ public class RentalService {
     public boolean rentBook(int userId, int bookId, int rentalPeriodDays) {
         String sql = """
             INSERT INTO rentals (user_id, book_id, rent_date, expected_return_date, status, extension_count) 
-            VALUES (?, ?, ?, ?, 'ACTIVE', 0)
+            VALUES (?, ?, DATE('now'), DATE('now', '+' || ? || ' days'), 'ACTIVE', 0)
             """;
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-            LocalDate rentDate = LocalDate.now();
-            LocalDate expectedReturnDate = rentDate.plusDays(rentalPeriodDays);
-
             pstmt.setInt(1, userId);
             pstmt.setInt(2, bookId);
-            pstmt.setDate(3, Date.valueOf(rentDate));
-            pstmt.setDate(4, Date.valueOf(expectedReturnDate));
+            pstmt.setInt(3, rentalPeriodDays);
 
             int affectedRows = pstmt.executeUpdate();
             if (affectedRows > 0) {
                 // Oznacz książkę jako wypożyczoną
                 bookService.updateBookAvailability(bookId, false);
-                System.out.println("Książka wypożyczona do: " + expectedReturnDate);
+                LocalDate expectedReturn = LocalDate.now().plusDays(rentalPeriodDays);
+                System.out.println("Książka wypożyczona do: " + expectedReturn);
                 return true;
             }
         } catch (SQLException e) {
@@ -133,7 +127,7 @@ public class RentalService {
     }
 
     public boolean returnBook(int rentalId) {
-        String sql = "UPDATE rentals SET return_date = ?, status = 'RETURNED' WHERE id = ?";
+        String sql = "UPDATE rentals SET return_date = DATE('now'), status = 'RETURNED' WHERE id = ?";
         String getBookIdSql = "SELECT book_id FROM rentals WHERE id = ?";
 
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -151,8 +145,7 @@ public class RentalService {
 
             // Zaktualizuj wypożyczenie
             try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setDate(1, Date.valueOf(LocalDate.now()));
-                pstmt.setInt(2, rentalId);
+                pstmt.setInt(1, rentalId);
 
                 int affectedRows = pstmt.executeUpdate();
                 if (affectedRows > 0) {
@@ -207,7 +200,7 @@ public class RentalService {
 
     private boolean performExtension(int rentalId, int additionalDays) {
         String selectSQL = "SELECT expected_return_date, extension_count FROM rentals WHERE id = ? AND status = 'ACTIVE'";
-        String updateSQL = "UPDATE rentals SET expected_return_date = ?, extension_count = extension_count + 1 WHERE id = ? AND status = 'ACTIVE'";
+        String updateSQL = "UPDATE rentals SET expected_return_date = DATE(expected_return_date, '+' || ? || ' days'), extension_count = extension_count + 1 WHERE id = ? AND status = 'ACTIVE'";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement selectStmt = conn.prepareStatement(selectSQL);
@@ -218,26 +211,36 @@ public class RentalService {
             ResultSet rs = selectStmt.executeQuery();
 
             if (rs.next()) {
-                Date currentExpectedDate = rs.getDate("expected_return_date");
+                String currentExpectedDateStr = rs.getString("expected_return_date");
                 int currentExtensionCount = rs.getInt("extension_count");
 
-                if (currentExpectedDate == null) {
+                if (currentExpectedDateStr == null || currentExpectedDateStr.trim().isEmpty()) {
                     // Jeśli nie ma ustalonej daty, użyj daty dzisiejszej + dodatkowe dni
-                    currentExpectedDate = Date.valueOf(LocalDate.now());
-                }
+                    String updateWithTodaySQL = "UPDATE rentals SET expected_return_date = DATE('now', '+' || ? || ' days'), extension_count = extension_count + 1 WHERE id = ? AND status = 'ACTIVE'";
+                    try (PreparedStatement todayStmt = conn.prepareStatement(updateWithTodaySQL)) {
+                        todayStmt.setInt(1, additionalDays);
+                        todayStmt.setInt(2, rentalId);
+                        int affectedRows = todayStmt.executeUpdate();
+                        if (affectedRows > 0) {
+                            LocalDate newExpectedDate = LocalDate.now().plusDays(additionalDays);
+                            System.out.println("Wypożyczenie " + rentalId + " przedłużone do: " + newExpectedDate +
+                                    " (przedłużenie nr " + (currentExtensionCount + 1) + ")");
+                            return true;
+                        }
+                    }
+                } else {
+                    // Oblicz nową datę na podstawie obecnej
+                    updateStmt.setInt(1, additionalDays);
+                    updateStmt.setInt(2, rentalId);
 
-                // Oblicz nową datę
-                LocalDate newExpectedDate = currentExpectedDate.toLocalDate().plusDays(additionalDays);
-
-                // Zaktualizuj datę i zwiększ licznik
-                updateStmt.setDate(1, Date.valueOf(newExpectedDate));
-                updateStmt.setInt(2, rentalId);
-
-                int affectedRows = updateStmt.executeUpdate();
-                if (affectedRows > 0) {
-                    System.out.println("Wypożyczenie " + rentalId + " przedłużone do: " + newExpectedDate +
-                            " (przedłużenie nr " + (currentExtensionCount + 1) + ")");
-                    return true;
+                    int affectedRows = updateStmt.executeUpdate();
+                    if (affectedRows > 0) {
+                        LocalDate currentExpectedDate = LocalDate.parse(currentExpectedDateStr);
+                        LocalDate newExpectedDate = currentExpectedDate.plusDays(additionalDays);
+                        System.out.println("Wypożyczenie " + rentalId + " przedłużone do: " + newExpectedDate +
+                                " (przedłużenie nr " + (currentExtensionCount + 1) + ")");
+                        return true;
+                    }
                 }
             }
 
@@ -269,7 +272,7 @@ public class RentalService {
     private boolean createExtensionRequest(int rentalId, int userId, int requestedDays) {
         String sql = """
             INSERT INTO extension_requests (rental_id, user_id, requested_days, request_date, status) 
-            VALUES (?, ?, ?, ?, 'PENDING')
+            VALUES (?, ?, ?, DATE('now'), 'PENDING')
             """;
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -278,7 +281,6 @@ public class RentalService {
             pstmt.setInt(1, rentalId);
             pstmt.setInt(2, userId);
             pstmt.setInt(3, requestedDays);
-            pstmt.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now()));
 
             int affectedRows = pstmt.executeUpdate();
             return affectedRows > 0;
@@ -326,7 +328,7 @@ public class RentalService {
         String selectSQL = "SELECT rental_id, requested_days FROM extension_requests WHERE id = ? AND status = 'PENDING'";
         String updateSQL = """
             UPDATE extension_requests 
-            SET status = ?, admin_decision_date = ?, admin_id = ?, admin_comment = ?
+            SET status = ?, admin_decision_date = DATE('now'), admin_id = ?, admin_comment = ?
             WHERE id = ?
             """;
 
@@ -352,10 +354,9 @@ public class RentalService {
             // Zaktualizuj status prośby
             try (PreparedStatement updateStmt = conn.prepareStatement(updateSQL)) {
                 updateStmt.setString(1, status);
-                updateStmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
-                updateStmt.setInt(3, adminId);
-                updateStmt.setString(4, comment);
-                updateStmt.setInt(5, requestId);
+                updateStmt.setInt(2, adminId);
+                updateStmt.setString(3, comment);
+                updateStmt.setInt(4, requestId);
                 updateStmt.executeUpdate();
             }
 
@@ -396,22 +397,37 @@ public class RentalService {
         rental.setUserId(rs.getInt("user_id"));
         rental.setBookId(rs.getInt("book_id"));
 
-        // Bezpieczne odczytywanie dat
-        Date rentDate = rs.getDate("rent_date");
-        if (rentDate != null) {
-            rental.setRentDate(rentDate.toLocalDate());
+        // Bezpieczne odczytywanie dat jako String i parsowanie
+        String rentDateStr = rs.getString("rent_date");
+        if (rentDateStr != null && !rentDateStr.trim().isEmpty()) {
+            try {
+                rental.setRentDate(LocalDate.parse(rentDateStr));
+            } catch (Exception e) {
+                rental.setRentDate(LocalDate.now());
+            }
         }
 
-        Date returnDate = rs.getDate("return_date");
-        if (returnDate != null) {
-            rental.setReturnDate(returnDate.toLocalDate());
+        String returnDateStr = rs.getString("return_date");
+        if (returnDateStr != null && !returnDateStr.trim().isEmpty()) {
+            try {
+                rental.setReturnDate(LocalDate.parse(returnDateStr));
+            } catch (Exception e) {
+                // Pozostaw null
+            }
         }
 
         // Bezpieczne odczytywanie expected_return_date
         try {
-            Date expectedReturnDate = rs.getDate("expected_return_date");
-            if (expectedReturnDate != null) {
-                rental.setExpectedReturnDate(expectedReturnDate.toLocalDate());
+            String expectedReturnDateStr = rs.getString("expected_return_date");
+            if (expectedReturnDateStr != null && !expectedReturnDateStr.trim().isEmpty()) {
+                try {
+                    rental.setExpectedReturnDate(LocalDate.parse(expectedReturnDateStr));
+                } catch (Exception e) {
+                    // Jeśli parsowanie się nie uda i mamy rent_date, ustaw domyślną
+                    if (rental.getRentDate() != null) {
+                        rental.setExpectedReturnDate(rental.getRentDate().plusDays(14));
+                    }
+                }
             } else {
                 // Jeśli brak daty, ustaw domyślną (14 dni od wypożyczenia)
                 if (rental.getRentDate() != null) {
@@ -458,16 +474,26 @@ public class RentalService {
         request.setUserId(rs.getInt("user_id"));
         request.setRequestedDays(rs.getInt("requested_days"));
 
-        Timestamp requestDate = rs.getTimestamp("request_date");
-        if (requestDate != null) {
-            request.setRequestDate(requestDate.toLocalDateTime());
+        // Bezpieczne odczytywanie request_date
+        String requestDateStr = rs.getString("request_date");
+        if (requestDateStr != null && !requestDateStr.trim().isEmpty()) {
+            try {
+                request.setRequestDate(LocalDate.parse(requestDateStr));
+            } catch (Exception e) {
+                request.setRequestDate(LocalDate.now());
+            }
         }
 
         request.setStatus(rs.getString("status"));
 
-        Timestamp adminDecisionDate = rs.getTimestamp("admin_decision_date");
-        if (adminDecisionDate != null) {
-            request.setAdminDecisionDate(adminDecisionDate.toLocalDateTime());
+        // Bezpieczne odczytywanie admin_decision_date
+        String adminDecisionDateStr = rs.getString("admin_decision_date");
+        if (adminDecisionDateStr != null && !adminDecisionDateStr.trim().isEmpty()) {
+            try {
+                request.setAdminDecisionDate(LocalDate.parse(adminDecisionDateStr));
+            } catch (Exception e) {
+                // Pozostaw null jeśli parsowanie się nie uda
+            }
         }
 
         try {

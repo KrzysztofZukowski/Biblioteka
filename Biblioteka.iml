@@ -12,5 +12,6 @@
     <orderEntry type="library" name="gson-2.10.1" level="project" />
     <orderEntry type="library" name="commons-beanutils-1.9.2" level="project" />
     <orderEntry type="library" name="tess4j-3.4.8" level="project" />
+    <orderEntry type="library" name="core-3.5.1" level="project" />
   </component>
 </module>

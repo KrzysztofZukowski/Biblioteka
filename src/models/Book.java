@@ -1,5 +1,7 @@
 package models;
 
+import java.time.LocalDate;
+
 public class Book {
     private int id;
     private String isbn;
@@ -8,7 +10,7 @@ public class Book {
     private String publisher;
     private int year;
     private boolean available;
-    private String createdAt;
+    private LocalDate createdAt;  // Zmieniono z String na LocalDate
 
     // Konstruktor domyślny
     public Book() {}
@@ -21,6 +23,7 @@ public class Book {
         this.publisher = publisher;
         this.year = year;
         this.available = true;
+        this.createdAt = LocalDate.now();  // Ustawienie domyślnej daty
     }
 
     // Gettery i settery
@@ -45,8 +48,8 @@ public class Book {
     public boolean isAvailable() { return available; }
     public void setAvailable(boolean available) { this.available = available; }
 
-    public String getCreatedAt() { return createdAt; }
-    public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+    public LocalDate getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDate createdAt) { this.createdAt = createdAt; }
 
     @Override
     public String toString() {

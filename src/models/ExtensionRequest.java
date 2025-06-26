@@ -1,15 +1,15 @@
 package models;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 public class ExtensionRequest {
     private int id;
     private int rentalId;
     private int userId;
     private int requestedDays;
-    private LocalDateTime requestDate;
+    private LocalDate requestDate;  // Zmieniono z LocalDateTime na LocalDate
     private String status; // PENDING, APPROVED, REJECTED
-    private LocalDateTime adminDecisionDate;
+    private LocalDate adminDecisionDate;  // Zmieniono z LocalDateTime na LocalDate
     private Integer adminId;
     private String adminComment;
 
@@ -26,7 +26,7 @@ public class ExtensionRequest {
         this.rentalId = rentalId;
         this.userId = userId;
         this.requestedDays = requestedDays;
-        this.requestDate = LocalDateTime.now();
+        this.requestDate = LocalDate.now();  // Zmieniono na LocalDate.now()
         this.status = "PENDING";
     }
 
@@ -43,14 +43,14 @@ public class ExtensionRequest {
     public int getRequestedDays() { return requestedDays; }
     public void setRequestedDays(int requestedDays) { this.requestedDays = requestedDays; }
 
-    public LocalDateTime getRequestDate() { return requestDate; }
-    public void setRequestDate(LocalDateTime requestDate) { this.requestDate = requestDate; }
+    public LocalDate getRequestDate() { return requestDate; }
+    public void setRequestDate(LocalDate requestDate) { this.requestDate = requestDate; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
-    public LocalDateTime getAdminDecisionDate() { return adminDecisionDate; }
-    public void setAdminDecisionDate(LocalDateTime adminDecisionDate) { this.adminDecisionDate = adminDecisionDate; }
+    public LocalDate getAdminDecisionDate() { return adminDecisionDate; }
+    public void setAdminDecisionDate(LocalDate adminDecisionDate) { this.adminDecisionDate = adminDecisionDate; }
 
     public Integer getAdminId() { return adminId; }
     public void setAdminId(Integer adminId) { this.adminId = adminId; }
