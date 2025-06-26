@@ -117,6 +117,7 @@ public class BookService {
     }
 
     public boolean addBook(Book book) {
+        // BRAK sprawdzania duplikatów - biblioteka może mieć wiele egzemplarzy tej samej książki!
         String sql = "INSERT INTO books (isbn, title, author, publisher, year, available, created_at) VALUES (?, ?, ?, ?, ?, ?, DATE('now'))";
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -160,11 +161,8 @@ public class BookService {
     }
 
     public boolean updateBook(Book book) {
-        // Przy edycji zachowujemy sprawdzanie duplikatów tylko dla tej samej książki
-        if (bookExistsExcludingId(book)) {
-            System.err.println("Książka o identycznych danych już istnieje w systemie!");
-            return false;
-        }
+        // USUNIĘTO sprawdzanie duplikatów - biblioteka może mieć wiele egzemplarzy!
+        // Każdy egzemplarz ma swoje unikalne ID, więc można edytować bez obaw
 
         String sql = "UPDATE books SET isbn = ?, title = ?, author = ?, publisher = ?, year = ? WHERE id = ?";
 
@@ -179,33 +177,13 @@ public class BookService {
             pstmt.setInt(6, book.getId());
 
             int affectedRows = pstmt.executeUpdate();
-            return affectedRows > 0;
-        } catch (SQLException e) {
-            e.printStackTrace();
+            if (affectedRows > 0) {
+                System.out.println("✅ Zaktualizowano książkę: " + book.getTitle() + " (ID: " + book.getId() + ")");
+                return true;
+            }
             return false;
-        }
-    }
-
-    private boolean bookExistsExcludingId(Book book) {
-        // Sprawdź tylko czy nie ma identycznej książki (dokładnie te same dane)
-        String sql = "SELECT COUNT(*) FROM books WHERE id != ? AND " +
-                "LOWER(TRIM(title)) = LOWER(TRIM(?)) AND " +
-                "LOWER(TRIM(author)) = LOWER(TRIM(?)) AND " +
-                "COALESCE(LOWER(TRIM(publisher)), '') = COALESCE(LOWER(TRIM(?)), '') AND " +
-                "COALESCE(year, 0) = COALESCE(?, 0)";
-
-        try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setInt(1, book.getId());
-            pstmt.setString(2, book.getTitle());
-            pstmt.setString(3, book.getAuthor());
-            pstmt.setString(4, book.getPublisher());
-            pstmt.setInt(5, book.getYear());
-
-            ResultSet rs = pstmt.executeQuery();
-            return rs.next() && rs.getInt(1) > 0;
         } catch (SQLException e) {
+            System.err.println("❌ Błąd podczas aktualizacji książki: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -219,8 +197,13 @@ public class BookService {
 
             pstmt.setInt(1, bookId);
             int affectedRows = pstmt.executeUpdate();
-            return affectedRows > 0;
+            if (affectedRows > 0) {
+                System.out.println("✅ Usunięto książkę o ID: " + bookId);
+                return true;
+            }
+            return false;
         } catch (SQLException e) {
+            System.err.println("❌ Błąd podczas usuwania książki: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -291,6 +274,50 @@ public class BookService {
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
             pstmt.setString(1, isbn);
+            ResultSet rs = pstmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    /**
+     * Sprawdza ile egzemplarzy książki o danym tytule i autorze jest w bibliotece
+     */
+    public int getBookCountByTitleAuthor(String title, String author) {
+        if (title == null || title.trim().isEmpty() || author == null || author.trim().isEmpty()) {
+            return 0;
+        }
+
+        String sql = "SELECT COUNT(*) FROM books WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND LOWER(TRIM(author)) = LOWER(TRIM(?))";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, title);
+            pstmt.setString(2, author);
+            ResultSet rs = pstmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return 0;
+        }
+    }
+
+    /**
+     * Sprawdza ile egzemplarzy książki o danym tytule i autorze jest dostępnych
+     */
+    public int getAvailableBookCountByTitleAuthor(String title, String author) {
+        if (title == null || title.trim().isEmpty() || author == null || author.trim().isEmpty()) {
+            return 0;
+        }
+
+        String sql = "SELECT COUNT(*) FROM books WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND LOWER(TRIM(author)) = LOWER(TRIM(?)) AND available = TRUE";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, title);
+            pstmt.setString(2, author);
             ResultSet rs = pstmt.executeQuery();
             return rs.next() ? rs.getInt(1) : 0;
         } catch (SQLException e) {

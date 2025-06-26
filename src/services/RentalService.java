@@ -251,6 +251,58 @@ public class RentalService {
         }
     }
 
+    /**
+     * Wersja performExtension która używa istniejącego połączenia (dla transakcji)
+     */
+    private boolean performExtensionWithConnection(Connection conn, int rentalId, int additionalDays) throws SQLException {
+        String selectSQL = "SELECT expected_return_date, extension_count FROM rentals WHERE id = ? AND status = 'ACTIVE'";
+        String updateSQL = "UPDATE rentals SET expected_return_date = DATE(expected_return_date, '+' || ? || ' days'), extension_count = extension_count + 1 WHERE id = ? AND status = 'ACTIVE'";
+
+        try (PreparedStatement selectStmt = conn.prepareStatement(selectSQL);
+             PreparedStatement updateStmt = conn.prepareStatement(updateSQL)) {
+
+            // Pobierz obecną datę
+            selectStmt.setInt(1, rentalId);
+            ResultSet rs = selectStmt.executeQuery();
+
+            if (rs.next()) {
+                String currentExpectedDateStr = rs.getString("expected_return_date");
+                int currentExtensionCount = rs.getInt("extension_count");
+
+                if (currentExpectedDateStr == null || currentExpectedDateStr.trim().isEmpty()) {
+                    // Jeśli nie ma ustalonej daty, użyj daty dzisiejszej + dodatkowe dni
+                    String updateWithTodaySQL = "UPDATE rentals SET expected_return_date = DATE('now', '+' || ? || ' days'), extension_count = extension_count + 1 WHERE id = ? AND status = 'ACTIVE'";
+                    try (PreparedStatement todayStmt = conn.prepareStatement(updateWithTodaySQL)) {
+                        todayStmt.setInt(1, additionalDays);
+                        todayStmt.setInt(2, rentalId);
+                        int affectedRows = todayStmt.executeUpdate();
+                        if (affectedRows > 0) {
+                            LocalDate newExpectedDate = LocalDate.now().plusDays(additionalDays);
+                            System.out.println("Wypożyczenie " + rentalId + " przedłużone do: " + newExpectedDate +
+                                    " (przedłużenie nr " + (currentExtensionCount + 1) + ")");
+                            return true;
+                        }
+                    }
+                } else {
+                    // Oblicz nową datę na podstawie obecnej
+                    updateStmt.setInt(1, additionalDays);
+                    updateStmt.setInt(2, rentalId);
+
+                    int affectedRows = updateStmt.executeUpdate();
+                    if (affectedRows > 0) {
+                        LocalDate currentExpectedDate = LocalDate.parse(currentExpectedDateStr);
+                        LocalDate newExpectedDate = currentExpectedDate.plusDays(additionalDays);
+                        System.out.println("Wypożyczenie " + rentalId + " przedłużone do: " + newExpectedDate +
+                                " (przedłużenie nr " + (currentExtensionCount + 1) + ")");
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
     private Rental getRentalById(int rentalId) {
         String sql = "SELECT r.*, b.title as book_title, b.author as book_author FROM rentals r JOIN books b ON r.book_id = b.id WHERE r.id = ?";
 
@@ -332,8 +384,10 @@ public class RentalService {
             WHERE id = ?
             """;
 
-        try (Connection conn = DatabaseManager.getConnection()) {
-            conn.setAutoCommit(false);
+        Connection conn = null;
+        try {
+            conn = DatabaseManager.getConnection();
+            conn.setAutoCommit(false); // Rozpocznij transakcję
 
             int rentalId = -1;
             int requestedDays = 0;
@@ -360,19 +414,36 @@ public class RentalService {
                 updateStmt.executeUpdate();
             }
 
-            // Jeśli zatwierdzono, przedłuż wypożyczenie
+            // Jeśli zatwierdzono, przedłuż wypożyczenie (używając tego samego połączenia)
             if ("APPROVED".equals(status)) {
-                if (!performExtension(rentalId, requestedDays)) {
+                if (!performExtensionWithConnection(conn, rentalId, requestedDays)) {
                     conn.rollback();
                     return false;
                 }
             }
 
-            conn.commit();
+            conn.commit(); // Zatwierdź transakcję
             return true;
+
         } catch (SQLException e) {
             e.printStackTrace();
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                } catch (SQLException rollbackEx) {
+                    rollbackEx.printStackTrace();
+                }
+            }
             return false;
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.setAutoCommit(true); // Przywróć domyślne ustawienie
+                    conn.close();
+                } catch (SQLException closeEx) {
+                    closeEx.printStackTrace();
+                }
+            }
         }
     }
 

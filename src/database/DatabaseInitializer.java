@@ -33,6 +33,7 @@ public class DatabaseInitializer {
             stmt.execute(createUsersTable);
 
             // Tworzenie tabeli books - zmieniono created_at na DATE
+            // USUNIĘTO UNIQUE z ISBN - biblioteka może mieć wiele egzemplarzy!
             String createBooksTable = """
                 CREATE TABLE IF NOT EXISTS books (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,10 +112,7 @@ public class DatabaseInitializer {
                 System.out.println("Dodano domyślnego administratora.");
             }
 
-            // Usuń duplikaty książek (bezpieczna operacja)
-            removeDuplicateBooks(conn);
-
-            // Dodanie przykładowych książek (tylko jeśli nie istnieją)
+            // Dodanie przykładowych książek - każda jako osobny egzemplarz
             addSampleBooksIfNotExist(conn);
 
             // Napraw istniejące wypożyczenia bez expected_return_date
@@ -122,8 +120,6 @@ public class DatabaseInitializer {
 
             // Ustaw domyślną wartość extension_count dla istniejących wypożyczeń
             fixExtensionCount(conn);
-
-            System.out.println("Baza danych została zainicjalizowana z ujednoliconymi datami!");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -169,8 +165,6 @@ public class DatabaseInitializer {
                 """;
             stmt.execute(updateExtDecisionDate);
 
-            System.out.println("Przekonwertowano timestamps na daty.");
-
         } catch (SQLException e) {
             System.out.println("Informacja: Nie można przekonwertować wszystkich dat: " + e.getMessage());
         }
@@ -188,65 +182,9 @@ public class DatabaseInitializer {
         }
     }
 
-    private static void removeDuplicateBooks(Connection conn) {
-        String removeDuplicatesByISBN = """
-            DELETE FROM books WHERE id NOT IN (
-                SELECT MIN(id) FROM books 
-                WHERE isbn IS NOT NULL AND isbn != '' 
-                GROUP BY isbn
-            ) AND isbn IS NOT NULL AND isbn != ''
-            """;
-
-        String removeDuplicatesByTitleAuthor = """
-            DELETE FROM books WHERE id NOT IN (
-                SELECT MIN(id) FROM books 
-                GROUP BY LOWER(TRIM(title)), LOWER(TRIM(author))
-            )
-            """;
-
-        try (PreparedStatement stmt1 = conn.prepareStatement(removeDuplicatesByISBN);
-             PreparedStatement stmt2 = conn.prepareStatement(removeDuplicatesByTitleAuthor)) {
-
-            int removedByISBN = stmt1.executeUpdate();
-            int removedByTitle = stmt2.executeUpdate();
-
-            if (removedByISBN > 0 || removedByTitle > 0) {
-                System.out.println("Usunięto " + (removedByISBN + removedByTitle) + " duplikatów książek.");
-            }
-        } catch (SQLException e) {
-            System.out.println("Informacja: Nie można usunąć duplikatów: " + e.getMessage());
-        }
-    }
-
-    private static boolean bookExistsByISBN(Connection conn, String isbn) {
-        if (isbn == null || isbn.trim().isEmpty()) {
-            return false;
-        }
-        String sql = "SELECT COUNT(*) FROM books WHERE isbn = ?";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, isbn);
-            ResultSet rs = pstmt.executeQuery();
-            return rs.next() && rs.getInt(1) > 0;
-        } catch (SQLException e) {
-            e.printStackTrace();
-            return false;
-        }
-    }
-
-    private static boolean bookExistsByTitleAuthor(Connection conn, String title, String author) {
-        String sql = "SELECT COUNT(*) FROM books WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND LOWER(TRIM(author)) = LOWER(TRIM(?))";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, title);
-            pstmt.setString(2, author);
-            ResultSet rs = pstmt.executeQuery();
-            return rs.next() && rs.getInt(1) > 0;
-        } catch (SQLException e) {
-            e.printStackTrace();
-            return false;
-        }
-    }
-
     private static void addSampleBooksIfNotExist(Connection conn) {
+        // Dodajemy przykładowe książki ZAWSZE (mogą być egzemplarze)
+        // Sprawdzamy tylko czy istnieje już jakikolwiek egzemplarz danego tytułu
         String[][] sampleBooks = {
                 {"9788375748116", "Władca Pierścieni", "J.R.R. Tolkien", "Iskry", "2012"},
                 {"9788328020085", "Wiedźmin: Ostatnie życzenie", "Andrzej Sapkowski", "SuperNOWA", "2014"},
@@ -257,7 +195,9 @@ public class DatabaseInitializer {
 
         try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
             for (String[] book : sampleBooks) {
-                if (!bookExistsByISBN(conn, book[0]) && !bookExistsByTitleAuthor(conn, book[1], book[2])) {
+                // Sprawdź czy istnieje już jakiś egzemplarz tego tytułu
+                if (!anyBookExistsByTitle(conn, book[1])) {
+                    // Dodaj pierwszy egzemplarz
                     pstmt.setString(1, book[0]); // ISBN
                     pstmt.setString(2, book[1]); // Title
                     pstmt.setString(3, book[2]); // Author
@@ -269,6 +209,18 @@ public class DatabaseInitializer {
             }
         } catch (SQLException e) {
             e.printStackTrace();
+        }
+    }
+
+    private static boolean anyBookExistsByTitle(Connection conn, String title) {
+        String sql = "SELECT COUNT(*) FROM books WHERE LOWER(TRIM(title)) = LOWER(TRIM(?))";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, title);
+            ResultSet rs = pstmt.executeQuery();
+            return rs.next() && rs.getInt(1) > 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
         }
     }
 
